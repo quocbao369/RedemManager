@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Data
+data/*.db
+data/*.db-*
+data/*.sqlite
+
+# Large binaries (APK/XAPK) - GitHub blocks files > 100 MB;
+# drop them in file_APK/ manually after cloning.
+file_APK/
+
+# Virtual environment
+.venv/
+
+# Test artifacts
+.coverage
+htmlcov/
+.pytest_cache/

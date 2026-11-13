@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}Overview - RedemManager{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Overview</h1>
+    <div class="filter-group">
+        <label>Tìm email</label>
+        <input type="search" id="search-email" placeholder="Nhập email cần tìm..." autocomplete="off" oninput="onSearchEmail()">
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="stat-icon instances"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+            <div class="stat-info">
+                <span class="stat-value" id="total-instances">-</span>
+                <span class="stat-label">Total Instances</span>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon running"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
+            <div class="stat-info">
+                <span class="stat-value" id="running-instances">-</span>
+                <span class="stat-label">Running</span>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon stopped"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/></svg></div>
+            <div class="stat-info">
+                <span class="stat-value" id="stopped-instances">-</span>
+                <span class="stat-label">Stopped</span>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon accounts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+            <div class="stat-info">
+                <span class="stat-value" id="total-accounts">-</span>
+                <span class="stat-label">Total Accounts</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="content-row">
+        <section class="card full-width">
+            <header class="card-header">
+                <h2>Accounts</h2>
+                <div class="card-header-controls">
+                    <button class="btn btn-secondary btn-sm" onclick="loadAccounts()">Refresh</button>
+                </div>
+            </header>
+            <div class="table-filters">
+                <div class="filter-group">
+                    <label>Group</label>
+                    <select id="filter-group" onchange="loadAccounts()">
+                        <option value="">All Groups</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Điểm</label>
+                    <select id="filter-ready" onchange="loadAccounts()">
+                        <option value="">Tất cả</option>
+                        <option value="true">Đủ điểm đổi thưởng</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Sort</label>
+                    <select id="sort-points" onchange="loadAccounts()">
+                        <option value="created_desc">Created (Newest first)</option>
+                        <option value="created_asc">Created (Oldest first)</option>
+                        <option value="desc">Points (High to Low)</option>
+                        <option value="asc">Points (Low to High)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="table-container">
+                <table class="data-table" id="accounts-table">
+                    <thead>
+                        <tr>
+                            <th>Account</th>
+                            <th>Group</th>
+                            <th>Created</th>
+                            <th>Points</th>
+                            <th>Proxy</th>
+                            <th>Instance</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="accounts-body"></tbody>
+                </table>
+            </div>
+            <div class="pagination" id="accounts-pagination"></div>
+        </section>
+    </div>
+
+    <div class="content-row">
+        <section class="card full-width">
+            <header class="card-header">
+                <h2>Quick Actions</h2>
+            </header>
+            <div class="quick-actions">
+                <button class="btn btn-primary" onclick="createInstance()">+ Create Instance</button>
+                <button class="btn btn-secondary" onclick="refreshInstances()">Refresh Instances</button>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/dashboard.js?v=20261106"></script>
+{% endblock %}

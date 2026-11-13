@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - RedemManager{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Settings</h1>
+</div>
+
+<div class="content-row">
+    <section class="card">
+        <header class="card-header"><h2>Paths</h2></header>
+        <form id="paths-form">
+            <div class="form-group">
+                <label>LDPlayer Directory</label>
+                <input type="text" name="ldplayer_path" id="ldplayer-path" placeholder="C:\ProgramFiles\LDPlayer">
+                <small>Path containing ldconsole.exe and adb.exe</small>
+            </div>
+            <div class="form-group">
+                <label>ADB Executable</label>
+                <input type="text" name="adb_path" id="adb-path" placeholder="C:\ProgramFiles\LDPlayer\adb.exe">
+            </div>
+            <div class="form-group">
+                <label>Bing APK Path</label>
+                <input type="text" name="bing_apk_path" id="bing-apk-path" placeholder="D:\AccMicro\MicrosoftBing_33.5.440623004_apkcombo.com.apk">
+                <small>Thay doi co hieu luc ngay, khong can restart va duoc luu vao .env.</small>
+            </div>
+            <div class="form-group">
+                <label>OxyProxy XAPK Path</label>
+                <input type="text" name="oxyproxy_xapk_path" id="oxyproxy-xapk-path" placeholder="D:\AccMicro\OxyProxy.xapk">
+                <small>Thay doi co hieu luc ngay, khong can restart va duoc luu vao .env.</small>
+            </div>
+            <button type="submit" class="btn btn-primary">Save Paths</button>
+        </form>
+    </section>
+
+    <section class="card">
+        <header class="card-header"><h2>Timeouts</h2></header>
+        <form id="timeouts-form">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Default Timeout (seconds)</label>
+                    <input type="number" name="default_timeout" id="default-timeout" min="10" max="600" value="120">
+                </div>
+                <div class="form-group">
+                    <label>Boot Timeout (seconds)</label>
+                    <input type="number" name="boot_timeout" id="boot-timeout" min="60" max="600" value="300">
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Save Timeouts</button>
+        </form>
+    </section>
+
+    <section class="card">
+        <header class="card-header"><h2>Server</h2></header>
+        <form id="server-form">
+            <div class="form-group">
+                <label>Server Host</label>
+                <input type="text" name="server_host" id="server-host" placeholder="127.0.0.1">
+                <small>Requires restart to take effect</small>
+            </div>
+            <div class="form-group">
+                <label>Server Port</label>
+                <input type="number" name="server_port" id="server-port" min="1024" max="65535" value="8765">
+                <small>Requires restart to take effect</small>
+            </div>
+            <button type="submit" class="btn btn-primary">Save Server Settings</button>
+        </form>
+    </section>
+
+    <section class="card">
+        <header class="card-header"><h2>URLs & Links</h2></header>
+        <form id="urls-form">
+            <div class="form-group">
+                <label>Bing Order History URL</label>
+                <input type="text" name="bing_order_history_url" id="bing-order-history-url" placeholder="https://rewards.bing.com/redeem/orderhistory">
+                <small>URL trang lịch sử đổi thưởng. Thay đổi có hiệu lực ngay.</small>
+            </div>
+            <div class="form-group">
+                <label>Connectivity Test URL</label>
+                <input type="text" name="connectivity_test_url" id="connectivity-test-url" placeholder="http://www.gstatic.com/generate_204">
+                <small>URL kiểm tra kết nối internet (trả về 204). Dùng khi gstatic bị chặn.</small>
+            </div>
+            <button type="submit" class="btn btn-primary">Save URLs</button>
+        </form>
+    </section>
+
+    <section class="card">
+        <header class="card-header"><h2>App Packages</h2></header>
+        <form id="packages-form">
+            <div class="form-group">
+                <label>Bing Package Name</label>
+                <input type="text" name="bing_package_name" id="bing-package-name" placeholder="com.microsoft.bing">
+            </div>
+            <div class="form-group">
+                <label>OxyProxy Package Name</label>
+                <input type="text" name="oxyproxy_package_name" id="oxyproxy-package-name" placeholder="com.oxyproxy.app">
+            </div>
+            <button type="submit" class="btn btn-primary">Save Packages</button>
+        </form>
+    </section>
+
+    <section class="card">
+        <header class="card-header"><h2>Database & Logging</h2></header>
+        <form id="db-log-form">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Database Path</label>
+                    <div class="input-with-button">
+                        <input type="text" name="database_path" id="database-path" placeholder="data/redem.db">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="openFilePicker('database-path')">Chọn file...</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Rewards DB Path</label>
+                    <div class="input-with-button">
+                        <input type="text" name="rewards_db_path" id="rewards-db-path" placeholder="D:\AccMicro\TOOL\VIP\rewards_data.db">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="openFilePicker('rewards-db-path')">Chọn file...</button>
+                    </div>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Log Level</label>
+                    <select name="log_level" id="log-level">
+                        <option value="DEBUG">DEBUG</option>
+                        <option value="INFO">INFO</option>
+                        <option value="WARNING">WARNING</option>
+                        <option value="ERROR">ERROR</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Workflow Lock Timeout (seconds)</label>
+                    <input type="number" name="workflow_lock_timeout" id="workflow-lock-timeout" min="60" max="86400" value="3600">
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Save Database &amp; Logging</button>
+            <button type="button" class="btn btn-secondary" onclick="loadNewDatabaseData()">&#8635; Load data m&#7899;i</button>
+            <div id="db-load-results" class="validation-results"></div>
+        </form>
+    </section>
+
+    <section class="card">
+        <header class="card-header"><h2>Proxy</h2></header>
+        <form id="proxy-form">
+            <div class="form-group">
+                <label>Link Rotation Proxy</label>
+                <input type="text" name="proxy_rotation_url" id="proxy-rotation-url" placeholder="http://.../rotate">
+                <small>Link xoay IP proxy. Tra ve JSON: {"status":"success","proxy":"ip:port:user:pass","ip":"..."}</small>
+            </div>
+            <div class="form-group">
+                <label>Proxy Global (ip:port:user:pass)</label>
+                <input type="text" name="proxy_global" id="proxy-global" placeholder="180.93.1.107:1080:username:password">
+                <small>Proxy V4 dung chung. Account V6 se xoay link tren roi nhat proxy nay vao app OxyProxy.</small>
+            </div>
+            <button type="submit" class="btn btn-primary">Save Proxy</button>
+            <button type="button" class="btn btn-secondary" onclick="rotateProxyNow()">Rotate Now</button>
+            <div id="proxy-results" class="validation-results"></div>
+        </form>
+    </section>
+
+    <section class="card">
+        <header class="card-header"><h2>Validation</h2></header>
+        <button class="btn btn-primary" onclick="validateSettings()">Validate All Paths</button>
+        <div id="validation-results" class="validation-results"></div>
+    </section>
+</div>
+
+<div class="card">
+    <header class="card-header"><h2>Current Configuration</h2></header>
+    <pre id="current-config" class="config-display"></pre>
+</div>
+
+<div class="modal" id="file-picker-modal">
+    <div class="modal-content large">
+        <header class="modal-header">
+            <h3>Chọn file - <span id="file-picker-title"></span></h3>
+            <button class="modal-close" onclick="hideFilePicker()">&times;</button>
+        </header>
+        <div class="file-picker">
+            <div class="file-picker-bar">
+                <input type="text" id="file-picker-path" placeholder="D:\...">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="goPickerPath()">Đi</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="browsePickerUp()">&uarr; Lên</button>
+            </div>
+            <label class="checkbox-label">
+                <input type="checkbox" id="file-picker-filter" checked onchange="refreshPickerView()">
+                <span>Chỉ hiện file database (.db / .sqlite / .sqlite3)</span>
+            </label>
+            <div class="file-picker-list" id="file-picker-list"></div>
+            <div class="modal-footer">
+                <span class="fp-selected-path" id="file-picker-selected"></span>
+                <button type="button" class="btn btn-secondary" onclick="hideFilePicker()">Hủy</button>
+                <button type="button" class="btn btn-primary" onclick="confirmFilePicker()">Chọn file này</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/settings.js?v=20261109"></script>
+{% endblock %}

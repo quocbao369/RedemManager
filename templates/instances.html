@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}LDPlayer Manager - RedemManager{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>LDPlayer Manager</h1>
+    <button class="btn btn-primary" onclick="showCreateInstanceModal()">+ Create Instance</button>
+</div>
+
+<div class="card">
+    <div class="table-filters">
+        <div class="filter-group">
+            <label>Tìm email</label>
+            <input type="search" id="search-instance" placeholder="Nhập email hoặc tên instance..." autocomplete="off" oninput="onSearchInstance()">
+        </div>
+    </div>
+    <div class="table-container">
+        <table class="data-table" id="instances-table">
+            <thead>
+                <tr>
+                    <th>Index</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Status</th>
+                    <th>Serial</th>
+                    <th>Android</th>
+                    <th>Resolution</th>
+                    <th>CPU</th>
+                    <th>Memory</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="instances-body"></tbody>
+        </table>
+    </div>
+</div>
+
+<div class="modal" id="create-instance-modal">
+    <div class="modal-content">
+        <header class="modal-header">
+            <h3>Create New Instance</h3>
+            <button class="modal-close" onclick="hideCreateInstanceModal()">&times;</button>
+        </header>
+        <form id="create-instance-form">
+            <div class="form-group">
+                <label>Instance Name (optional)</label>
+                <input type="text" name="name" placeholder="Leave empty for auto-name">
+            </div>
+            <div class="form-group">
+                <label>Copy từ instance (optional)</label>
+                <select name="clone_from" id="clone-from-select">
+                    <option value="">-- Tạo mới trống (không có app) --</option>
+                </select>
+                <small class="form-hint">Copy se giu nguyen device ID (Android ID, IMEI, MAC) cua may nguon,
+                    khien Microsoft bao loi <b>check thiet bi 24h</b>. Chi dung
+                    khi can instance giong het y chang.</small>
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" name="phone_mode" checked>
+                    <span>Phone mode (portrait 480x854, 2 CPU, 2GB RAM)</span>
+                </label>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="hideCreateInstanceModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Create</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="modal" id="rename-instance-modal">
+    <div class="modal-content">
+        <header class="modal-header">
+            <h3>Rename Instance</h3>
+            <button class="modal-close" onclick="hideRenameModal()">&times;</button>
+        </header>
+        <form id="rename-instance-form">
+            <input type="hidden" id="rename-instance-index" name="index">
+            <div class="form-group">
+                <label>New Name</label>
+                <input type="text" id="rename-instance-name" name="name" required>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="hideRenameModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Rename</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="modal" id="instance-log-modal">
+    <div class="modal-content large">
+        <header class="modal-header">
+            <h3>Instance Log - <span id="log-instance-name"></span></h3>
+            <button class="modal-close" onclick="hideInstanceLogModal()">&times;</button>
+        </header>
+        <div class="log-viewer" id="instance-log-content"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/instances.js?v=20261106"></script>
+{% endblock %}

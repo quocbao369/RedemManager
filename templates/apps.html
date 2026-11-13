@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}App Manager - RedemManager{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>App Manager</h1>
+</div>
+
+<div class="content-row">
+    <section class="card">
+        <header class="card-header">
+            <h2>Bing APK</h2>
+        </header>
+        <div class="app-info" id="bing-info">
+            <div class="info-row">
+                <span class="info-label">Path:</span>
+                <span class="info-value" id="bing-path">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Exists:</span>
+                <span class="info-value status" id="bing-exists">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Package:</span>
+                <span class="info-value" id="bing-package">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Version:</span>
+                <span class="info-value" id="bing-version">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Status:</span>
+                <span class="info-value status" id="bing-status">-</span>
+            </div>
+        </div>
+        <div class="app-actions">
+            <button class="btn btn-primary" onclick="checkBingAPK()">Verify APK</button>
+            <button class="btn btn-secondary" onclick="installBingToSelected()">Install to Selected</button>
+        </div>
+    </section>
+
+    <section class="card">
+        <header class="card-header">
+            <h2>OxyProxy XAPK</h2>
+        </header>
+        <div class="app-info" id="oxyproxy-info">
+            <div class="info-row">
+                <span class="info-label">Path:</span>
+                <span class="info-value" id="oxyproxy-path">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Exists:</span>
+                <span class="info-value status" id="oxyproxy-exists">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Total APKs:</span>
+                <span class="info-value" id="oxyproxy-count">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Base APK:</span>
+                <span class="info-value" id="oxyproxy-base">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Split APKs:</span>
+                <span class="info-value" id="oxyproxy-splits">-</span>
+            </div>
+        </div>
+        <div class="app-actions">
+            <button class="btn btn-primary" onclick="analyzeOxyProxyXAPK()">Analyze XAPK</button>
+            <button class="btn btn-secondary" onclick="installOxyProxyToSelected()">Install to Selected</button>
+        </div>
+    </section>
+</div>
+
+<div class="card">
+    <header class="card-header">
+        <h2>Target Instances</h2>
+    </header>
+    <div class="table-container">
+        <table class="data-table" id="target-instances-table">
+            <thead>
+                <tr>
+                    <th><input type="checkbox" id="select-all-instances"></th>
+                    <th>Index</th>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th>Serial</th>
+                    <th>Bing Installed</th>
+                    <th>OxyProxy Installed</th>
+                </tr>
+            </thead>
+            <tbody id="target-instances-body"></tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/apps.js?v=20261106"></script>
+{% endblock %}
