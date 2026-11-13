@@ -378,21 +378,69 @@ function goToInstance(index) {
     app.navigate('/instances');
 }
 
+let assignTargetEmail = null;
+
 async function assignInstance(email) {
     // A fresh instance is created rather than cloned: a copy of LDPlayer-0
     // keeps the same device fingerprint (Android ID / IMEI / MAC), which makes
-    // Microsoft flag the account with a 24 hour device check.
-    const ok = confirm(
-        `Tao LDPlayer moi cho ${email}?\n\n`
-        + 'May emu moi se co san ID rieng de tranh loi check 24h.');
-    if (!ok) return;
+    // Microsoft flag the account with a 24 hour device check. Which LDPlayer
+    // installation (9 or 14) owns the new instance is picked in the modal.
+    assignTargetEmail = email;
+    const label = document.getElementById('assign-email-label');
+    if (label) label.textContent = email;
+    const typeSelect = document.getElementById('assign-ld-version');
+    if (typeSelect) typeSelect.disabled = false;
+    await populateAssignRuntimes();
+    app.showModal('assign-instance-modal');
+}
+
+// Mark the installations that are drivable; LD14 stays visible but locked
+// with a hint until its folder is configured in Settings > Paths.
+async function populateAssignRuntimes() {
+    const select = document.getElementById('assign-ld-version');
+    if (!select) return;
+    try {
+        const { versions } = await app.api('/api/ldplayer/runtimes');
+        const byVersion = {};
+        (versions || []).forEach(v => { byVersion[v.version] = v; });
+        Array.from(select.options).forEach(opt => {
+            const info = byVersion[Number(opt.value)];
+            if (info) {
+                opt.disabled = !info.available;
+                opt.textContent = info.available
+                    ? info.name
+                    : `${info.name} (chua cau hinh trong Settings)`;
+            }
+        });
+        // Do not leave the selection on a disabled option.
+        if (select.selectedOptions[0] && select.selectedOptions[0].disabled) {
+            const firstEnabled = Array.from(select.options).find(o => !o.disabled);
+            if (firstEnabled) select.value = firstEnabled.value;
+        }
+    } catch (err) {
+        console.warn('khong tai duoc runtimes', err);
+    }
+}
+
+function hideAssignModal() {
+    app.hideModal('assign-instance-modal');
+    assignTargetEmail = null;
+}
+
+async function confirmAssignInstance() {
+    const email = assignTargetEmail;
+    if (!email) { hideAssignModal(); return; }
+    const typeSelect = document.getElementById('assign-ld-version');
+    const ldVersion = typeSelect ? (Number(typeSelect.value) || 9) : 9;
+    app.hideModal('assign-instance-modal');
+    assignTargetEmail = null;
 
     try {
         const result = await app.api('/api/instances', {
             method: 'POST',
-            body: JSON.stringify({ name: email, phone_mode: true }),
+            body: JSON.stringify({ name: email, phone_mode: true, ld_version: ldVersion }),
         });
-        app.showToast(`Instance created with index ${result.index}`, 'success');
+        app.showToast(`Tao instance moi tren LD${result.ld_version || ldVersion} (index ${result.index})`, 'success');
         assignInstanceToAccount(email, result.index);
     } catch (e) {
         app.showToast(e.message, 'error');
@@ -459,18 +507,29 @@ async function createInstance() {
     if (name === null) return;
 
     let cloneFrom = null;
+    let ldVersion = 9;
     try {
-        const { items } = await app.api('/api/instances');
+        // /api/instances returns a plain array; the old "{ items }" destructure
+        // silently produced an empty copy list.
+        const items = await app.api('/api/instances');
         const list = (items || [])
-            .map(i => `  LDPlayer-${i.index}   ${i.name}`
+            .map(i => `  LD${i.ld_version || 9}-${i.index}   ${i.name}`
                 + (String(i.status).toLowerCase() === 'running' ? '   (dang chay)' : ''))
             .join('\n');
         const picked = prompt(
-            `Copy tu instance nao? (de trong = tao moi khong copy)\n\n${list}\n\nNhap so index:`,
+            `Copy tu instance nao? (de trong = tao moi khong copy)\n`
+            + `Nhap dang "9:5" hoac "14:5" de chon ban LDPlayer, neu chi nhap so thi la LD9.\n\n${list}\n\nNhap so index:`,
             '');
         if (picked === null) return;
-        if (picked.trim() !== '') {
-            cloneFrom = Number(picked.trim());
+        const raw = picked.trim();
+        if (raw !== '') {
+            if (raw.includes(':')) {
+                const parts = raw.split(':');
+                ldVersion = Number(parts[0]) || 9;
+                cloneFrom = Number(parts[1]);
+            } else {
+                cloneFrom = Number(raw);
+            }
             if (!Number.isInteger(cloneFrom)) {
                 app.showToast('Index khong hop le', 'error');
                 return;
@@ -482,13 +541,14 @@ async function createInstance() {
 
     app.api('/api/instances', {
         method: 'POST',
-        body: JSON.stringify({ name: name || null, clone_from: cloneFrom }),
+        body: JSON.stringify({ name: name || null, clone_from: cloneFrom, ld_version: ldVersion }),
     })
     .then(result => {
+        const usedVersion = result.ld_version || ldVersion;
         app.showToast(
             cloneFrom === null
-                ? `Instance created with index ${result.index}`
-                : `Copied from LDPlayer-${cloneFrom} -> index ${result.index}`,
+                ? `Instance created on LD${usedVersion} (index ${result.index})`
+                : `Copied from LD${usedVersion}-${cloneFrom} -> index ${result.index}`,
             'success');
         loadOverview();
         if (typeof loadInstances === 'function') loadInstances();
@@ -544,6 +604,8 @@ window.goToInstance = goToInstance;
 window.assignInstance = assignInstance;
 window.assignInstanceToAccount = assignInstanceToAccount;
 window.unassignInstance = unassignInstance;
+window.hideAssignModal = hideAssignModal;
+window.confirmAssignInstance = confirmAssignInstance;
 window.createInstance = createInstance;
 window.refreshInstances = refreshInstances;
 window.syncInstances = syncInstances;
