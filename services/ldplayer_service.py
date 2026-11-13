@@ -21,6 +21,7 @@ class InstanceInfo:
     resolution: Optional[str] = None
     cpu_cores: Optional[int] = None
     memory_mb: Optional[int] = None
+    ld_version: int = 9
 
 
 class LDPlayerService:
@@ -28,6 +29,7 @@ class LDPlayerService:
     # restarting the server.
     @property
     def ldconsole(self) -> Path:
+        """Default (LDPlayer 9) console path - kept for compatibility."""
         return settings.ldplayer.ldconsole_path
 
     @property
@@ -38,12 +40,30 @@ class LDPlayerService:
     def default_timeout(self) -> int:
         return settings.ldplayer.default_timeout
 
-    def _run_cmd(self, args: List[str], timeout: Optional[int] = None) -> subprocess.CompletedProcess:
+    def _console_path(self, ld_version: int = 9) -> Path:
+        """ldconsole.exe of the requested LDPlayer installation.
+
+        Raises for LDPlayer 14 when its folder was never configured, so a
+        mis-routed call surfaces as a clear error instead of silently
+        talking to the wrong installation.
+        """
+        if ld_version == 14:
+            cfg = settings.ldplayer14
+            if not cfg.ldconsole_path:
+                raise RuntimeError(
+                    "LDPlayer 14 chua duoc cau hinh - dat thu muc cai dat "
+                    "trong Settings > Paths (LDPlayer 14 Directory)")
+            return cfg.ldconsole_path
+        return settings.ldplayer.ldconsole_path
+
+    def _run_cmd(self, args: List[str], timeout: Optional[int] = None,
+                 ld_version: int = 9) -> subprocess.CompletedProcess:
         if timeout is None:
             timeout = self.default_timeout
+        console = self._console_path(ld_version)
         try:
             result = subprocess.run(
-                [str(self.ldconsole)] + args,
+                [str(console)] + args,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -54,7 +74,7 @@ class LDPlayerService:
         except subprocess.TimeoutExpired as e:
             raise RuntimeError(f"Command timed out after {timeout}s: {' '.join(args)}") from e
         except FileNotFoundError:
-            raise RuntimeError(f"ldconsole not found at {self.ldconsole}")
+            raise RuntimeError(f"ldconsole not found at {console}")
 
     def _run_adb(self, args: List[str], timeout: Optional[int] = None) -> subprocess.CompletedProcess:
         if timeout is None:
@@ -74,8 +94,8 @@ class LDPlayerService:
         except FileNotFoundError:
             raise RuntimeError(f"adb not found at {self.adb}")
 
-    def list_instances(self) -> List[InstanceInfo]:
-        result = self._run_cmd(["list2"])
+    def list_instances(self, ld_version: int = 9) -> List[InstanceInfo]:
+        result = self._run_cmd(["list2"], ld_version=ld_version)
         if result.returncode != 0:
             raise RuntimeError(f"Failed to list instances: {result.stderr}")
 
@@ -90,10 +110,11 @@ class LDPlayerService:
                 # Running status is in parts[4] (1 = running, 0 = stopped)
                 is_running = parts[4] == "1"
                 status = "running" if is_running else "stopped"
-                instances.append(InstanceInfo(index=index, name=name, status=status))
+                instances.append(InstanceInfo(index=index, name=name,
+                                              status=status, ld_version=ld_version))
         return instances
 
-    def get_instance_detail(self, index: int) -> Optional[InstanceInfo]:
+    def get_instance_detail(self, index: int, ld_version: int = 9) -> Optional[InstanceInfo]:
         """Read an instance's detail from `list2`.
 
         NOTE: LDPlayer 9's `list3` field 2 is NOT the started/running flag - on a
@@ -101,7 +122,7 @@ class LDPlayerService:
         wait_for_boot() spin until it timed out. `list2` field 4 (androidstarted)
         is the reliable value.
         """
-        result = self._run_cmd(["list2"])
+        result = self._run_cmd(["list2"], ld_version=ld_version)
         if result.returncode != 0:
             return None
 
@@ -117,28 +138,43 @@ class LDPlayerService:
                 index=int(parts[0]),
                 name=parts[1],
                 status="running" if parts[4] == "1" else "stopped",
-                serial=self.get_serial(index),
+                serial=self.get_serial(index, ld_version=ld_version),
                 resolution=f"{parts[7]}x{parts[8]}" if parts[7] and parts[8] else None,
+                ld_version=ld_version,
             )
         return None
 
     def get_ld_index(self, db_id: int) -> Optional[int]:
         """Get LD index from database ID."""
-        with Database.transaction() as conn:
-            cursor = conn.execute("SELECT ld_index FROM instances WHERE id = ?", (db_id,))
-            row = cursor.fetchone()
-            return row["ld_index"] if row else None
+        ident = self.get_instance_identity(db_id)
+        return ident[0] if ident else None
 
-    def _finalize_new_instance(self, ld_index: int, phone_mode: bool) -> int:
+    def get_instance_identity(self, db_id: int) -> Optional[Tuple[int, int]]:
+        """Resolve a DB row into (ld_index, ld_version).
+
+        The installation version matters for every ldconsole call: index 3
+        may exist in both LDPlayer 9 and LDPlayer 14.
+        """
+        with Database.transaction() as conn:
+            cursor = conn.execute(
+                "SELECT ld_index, ld_version FROM instances WHERE id = ?", (db_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return row["ld_index"], row["ld_version"] or 9
+
+    def _finalize_new_instance(self, ld_index: int, phone_mode: bool,
+                               ld_version: int = 9) -> int:
         """Apply settings to a freshly created instance and return its DB id."""
         if phone_mode:
-            self.configure_phone_mode(ld_index)
+            self.configure_phone_mode(ld_index, ld_version=ld_version)
         # ADB debugging is required for installing apps / setting the proxy.
-        self.enable_adb_debug(ld_index)
+        self.enable_adb_debug(ld_index, ld_version=ld_version)
 
         self.sync_instances_to_db()
         for inst in self.get_db_instances():
-            if inst["ld_index"] == ld_index:
+            if (inst["ld_index"] == ld_index
+                    and (inst.get("ld_version") or 9) == ld_version):
                 return inst["id"]
         return ld_index  # fallback
 
@@ -154,79 +190,82 @@ class LDPlayerService:
         cleaned = name.strip()
         return re.sub(r"@.*$", "", cleaned) or cleaned
 
-    def create_instance(self, name: Optional[str] = None, phone_mode: bool = True) -> int:
+    def create_instance(self, name: Optional[str] = None, phone_mode: bool = True,
+                        ld_version: int = 9) -> int:
         name = self.short_name(name)
         args = ["add"]
         if name:
             args.extend(["--name", name])
-        before = set(i.index for i in self.list_instances())
-        result = self._run_cmd(args)
-        after = set(i.index for i in self.list_instances())
+        before = set(i.index for i in self.list_instances(ld_version=ld_version))
+        result = self._run_cmd(args, ld_version=ld_version)
+        after = set(i.index for i in self.list_instances(ld_version=ld_version))
         new_indices = after - before
         if new_indices:
-            return self._finalize_new_instance(max(new_indices), phone_mode)
+            return self._finalize_new_instance(max(new_indices), phone_mode, ld_version)
 
         output = result.stdout.strip()
         match = re.search(r"index[:\s]+(\d+)", output, re.IGNORECASE)
         if match:
-            return self._finalize_new_instance(int(match.group(1)), phone_mode)
+            return self._finalize_new_instance(int(match.group(1)), phone_mode, ld_version)
 
-        instances = self.list_instances()
+        instances = self.list_instances(ld_version=ld_version)
         if instances:
-            return self._finalize_new_instance(max(i.index for i in instances), phone_mode)
+            return self._finalize_new_instance(max(i.index for i in instances), phone_mode, ld_version)
         raise RuntimeError("Instance created but could not determine index")
 
     def clone_instance(self, source_index: int, name: Optional[str] = None,
-                       phone_mode: bool = True) -> int:
+                       phone_mode: bool = True, ld_version: int = 9) -> int:
         """Copy an existing instance (LDPlayer "copy") and return its DB id.
 
         The source instance is left untouched. LDPlayer refuses to clone a
         running instance, so it is stopped first and started again afterwards
-        when the caller had it running.
+        when the caller had it running. Source and copy always live in the
+        same LDPlayer installation.
         """
-        if source_index not in set(i.index for i in self.list_instances()):
+        if source_index not in set(i.index for i in self.list_instances(ld_version=ld_version)):
             raise ValueError(f"Instance nguon {source_index} khong ton tai")
 
-        was_running = self.is_running(source_index)
+        was_running = self.is_running(source_index, ld_version=ld_version)
         if was_running:
-            self.quit_instance(source_index)
-            self._wait_stopped(source_index, timeout=180)
+            self.quit_instance(source_index, ld_version=ld_version)
+            self._wait_stopped(source_index, timeout=180, ld_version=ld_version)
 
         name = self.short_name(name)
-        before = set(i.index for i in self.list_instances())
+        before = set(i.index for i in self.list_instances(ld_version=ld_version))
         # ldconsole only accepts "--name" before "--from"; the reverse order
         # makes it print the usage screen and fail with -1000.
         args = ["copy"]
         if name:
             args.extend(["--name", name])
         args.extend(["--from", str(source_index)])
-        result = self._run_cmd(args, timeout=1800)
+        result = self._run_cmd(args, timeout=1800, ld_version=ld_version)
 
-        after = set(i.index for i in self.list_instances())
+        after = set(i.index for i in self.list_instances(ld_version=ld_version))
         new_indices = after - before
 
         if was_running:
-            self.launch_instance(source_index, wait_for_boot=False)
+            self.launch_instance(source_index, wait_for_boot=False, ld_version=ld_version)
 
         if new_indices:
-            return self._finalize_new_instance(max(new_indices), phone_mode)
+            return self._finalize_new_instance(max(new_indices), phone_mode, ld_version)
 
         # ldconsole returns the new index as its exit code on success, and a
         # negative code (e.g. -1000) when it rejected the arguments. Index 0
         # can never be new because it is the source we copied from.
         code = result.returncode
         if isinstance(code, int) and code >= 0:
-            return self._finalize_new_instance(code, phone_mode)
+            return self._finalize_new_instance(code, phone_mode, ld_version)
 
         match = re.search(r"index[:\s]+(\d+)", result.stdout.strip(), re.IGNORECASE)
         if match:
-            return self._finalize_new_instance(int(match.group(1)), phone_mode)
+            return self._finalize_new_instance(int(match.group(1)), phone_mode, ld_version)
         raise RuntimeError(
             "Da copy instance nhung khong xac dinh duoc index moi: "
             f"{result.stderr.strip() or result.stdout.strip()}")
 
-    def rename_instance(self, index: int, new_name: str) -> bool:
-        result = self._run_cmd(["rename", "--index", str(index), "--title", new_name])
+    def rename_instance(self, index: int, new_name: str, ld_version: int = 9) -> bool:
+        result = self._run_cmd(["rename", "--index", str(index), "--title", new_name],
+                               ld_version=ld_version)
         if result.returncode != 0:
             raise RuntimeError(f"Failed to rename instance {index}: {result.stderr}")
         return True
@@ -249,18 +288,18 @@ class LDPlayerService:
         ("sony", "XQ-ES72"),
     ]
 
-    def _instance_config_path(self, index: int) -> Path:
+    def _instance_config_path(self, index: int, ld_version: int = 9) -> Path:
         """Path to LDPlayer's per-instance config file (leidian<N>.config)."""
-        return Path(self.ldconsole).parent / "vms" / "config" / f"leidian{index}.config"
+        return self._console_path(ld_version).parent / "vms" / "config" / f"leidian{index}.config"
 
-    def enable_adb_debug(self, index: int) -> bool:
+    def enable_adb_debug(self, index: int, ld_version: int = 9) -> bool:
         """Turn on ADB debugging for an instance.
 
         LDPlayer has no CLI switch for this, but the emulator reads
         "basicSettings.adbDebug" from its config file. The instance must be
         stopped, otherwise LDPlayer overwrites the file on shutdown.
         """
-        config_path = self._instance_config_path(index)
+        config_path = self._instance_config_path(index, ld_version=ld_version)
         if not config_path.exists():
             return False
 
@@ -276,14 +315,15 @@ class LDPlayerService:
         config_path.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
         return True
 
-    def set_vietnamese_language(self, index: int, restart_framework: bool = True) -> bool:
+    def set_vietnamese_language(self, index: int, restart_framework: bool = True,
+                                ld_version: int = 9) -> bool:
         """Switch the Android system locale of a running instance to vi-VN.
 
         LDPlayer only stores its own UI language (leidians.config); the guest
         locale lives in the system properties, so it has to be pushed over
         ADB. Changing it needs a framework restart to take effect.
         """
-        serial = self.get_serial(index)
+        serial = self.get_serial(index, ld_version=ld_version)
         if not serial or not adb_service.ensure_device(serial, timeout=60):
             return False
 
@@ -301,7 +341,7 @@ class LDPlayerService:
         # The framework restarts; wait for Android to accept ADB again.
         return adb_service.ensure_device(serial, timeout=180)
 
-    def configure_phone_mode(self, index: int) -> bool:
+    def configure_phone_mode(self, index: int, ld_version: int = 9) -> bool:
         # Compact portrait phone: 480x854 @ 240dpi, 2 CPU, 2048 MB
         manufacturer, model = random.choice(self.PHONE_MODELS)
         result = self._run_cmd([
@@ -313,34 +353,36 @@ class LDPlayerService:
             "--model", model,
             "--autorotate", "0",
             "--lockwindow", "1"
-        ])
+        ], ld_version=ld_version)
         if result.returncode != 0:
             raise RuntimeError(f"Failed to configure phone mode for instance {index}: {result.stderr}")
         return True
 
-    def rename_instance(self, index: int, new_name: str) -> bool:
-        result = self._run_cmd(["rename", "--index", str(index), "--title", new_name])
+    def rename_instance(self, index: int, new_name: str, ld_version: int = 9) -> bool:
+        result = self._run_cmd(["rename", "--index", str(index), "--title", new_name],
+                               ld_version=ld_version)
         if result.returncode != 0:
             raise RuntimeError(f"Failed to rename instance {index}: {result.stderr}")
         return True
 
-    def launch_instance(self, index: int, wait_for_boot: bool = True) -> bool:
+    def launch_instance(self, index: int, wait_for_boot: bool = True,
+                        ld_version: int = 9) -> bool:
         try:
-            result = self._run_cmd(["launch", "--index", str(index)])
+            result = self._run_cmd(["launch", "--index", str(index)], ld_version=ld_version)
             if result.returncode != 0:
                 raise RuntimeError(f"Failed to launch instance {index}: {result.stderr}")
         except Exception as e:
             # A frozen emulator refuses `launch`; recover it and try again.
             log_activity("WARN", f"Launch failed ({e}), restarting instance {index}")
-            if not self.restart_instance(index, wait_for_boot=wait_for_boot):
+            if not self.restart_instance(index, wait_for_boot=wait_for_boot, ld_version=ld_version):
                 raise RuntimeError(f"Failed to launch instance {index}: {e}")
 
         if wait_for_boot:
-            return self.wait_for_boot(index)
+            return self.wait_for_boot(index, ld_version=ld_version)
         return True
 
     def wait_for_boot(self, index: int, timeout: Optional[int] = None,
-                      allow_restart: bool = True) -> bool:
+                      allow_restart: bool = True, ld_version: int = 9) -> bool:
         """Wait until Android has fully booted, verified through ADB.
 
         On timeout the instance is force-restarted once, because a stuck boot
@@ -348,11 +390,11 @@ class LDPlayerService:
         """
         if timeout is None:
             timeout = settings.ldplayer.boot_timeout
-        serial = self.get_serial(index)
+        serial = self.get_serial(index, ld_version=ld_version)
         deadline = time.time() + timeout
 
         while time.time() < deadline:
-            detail = self.get_instance_detail(index)
+            detail = self.get_instance_detail(index, ld_version=ld_version)
             if detail and detail.status == "running":
                 if adb_service.ensure_device(serial, timeout=30):
                     boot = adb_service.shell(serial, "getprop sys.boot_completed")
@@ -365,11 +407,12 @@ class LDPlayerService:
 
         log_activity("WARN",
                      f"Instance {index} boot timeout ({timeout}s) - restarting")
-        if self.restart_instance(index, wait_boot=True, attempts=1):
+        if self.restart_instance(index, wait_boot=True, attempts=1, ld_version=ld_version):
             return True
         raise TimeoutError(f"Instance {index} did not boot after restart")
 
-    def _wait_stopped(self, index: int, timeout: int = 180) -> bool:
+    def _wait_stopped(self, index: int, timeout: int = 180,
+                      ld_version: int = 9) -> bool:
         """Wait until LDPlayer reports the instance as fully stopped.
 
         Cloning copies the disk image, so both the reported status and the
@@ -377,13 +420,13 @@ class LDPlayerService:
         """
         deadline = time.time() + timeout
         while time.time() < deadline:
-            detail = self.get_instance_detail(index)
-            if (not detail or detail.status == "stopped") and not self.get_pids(index):
+            detail = self.get_instance_detail(index, ld_version=ld_version)
+            if (not detail or detail.status == "stopped") and not self.get_pids(index, ld_version=ld_version):
                 return True
             time.sleep(3)
         return False
 
-    def get_pids(self, index: int) -> Optional[tuple]:
+    def get_pids(self, index: int, ld_version: int = 9) -> Optional[tuple]:
         """Return (dnplayer_pid, ldvbox_pid) for a running instance.
 
         LDPlayer 9 list2 layout: index,title,topWin,bindWin,androidStarted,
@@ -391,7 +434,7 @@ class LDPlayerService:
         service is intentionally NOT included so it is never killed.
         """
         try:
-            result = self._run_cmd(["list2"], timeout=20)
+            result = self._run_cmd(["list2"], timeout=20, ld_version=ld_version)
         except Exception:
             return None
         if result.returncode != 0:
@@ -422,7 +465,7 @@ class LDPlayerService:
         except Exception:
             return False
 
-    def force_stop(self, index: int) -> bool:
+    def force_stop(self, index: int, ld_version: int = 9) -> bool:
         """Stop an instance, escalating to killing its own processes.
 
         A hung emulator no longer answers `ldconsole quit`, so the only way out
@@ -430,7 +473,8 @@ class LDPlayerService:
         """
         stopped = False
         try:
-            result = self._run_cmd(["quit", "--index", str(index)], timeout=30)
+            result = self._run_cmd(["quit", "--index", str(index)], timeout=30,
+                                   ld_version=ld_version)
             stopped = result.returncode == 0
         except Exception:
             stopped = False
@@ -439,13 +483,13 @@ class LDPlayerService:
         deadline = time.time() + 8
         while time.time() < deadline:
             try:
-                if not self.is_running(index):
+                if not self.is_running(index, ld_version=ld_version):
                     return True
             except Exception:
                 break
             time.sleep(2)
 
-        pids = self.get_pids(index)
+        pids = self.get_pids(index, ld_version=ld_version)
         if not pids:
             return stopped
         killed = False
@@ -454,17 +498,17 @@ class LDPlayerService:
         time.sleep(4)
         return stopped or killed
 
-    def is_responsive(self, index: int) -> bool:
+    def is_responsive(self, index: int, ld_version: int = 9) -> bool:
         """Cheap health probe: ldconsole answers and, if running, ADB is online."""
-        if not self.is_running(index):
+        if not self.is_running(index, ld_version=ld_version):
             # A stopped instance is healthy; an exception inside is_running
             # already returned False, so confirm the process really is down.
             try:
-                self._run_cmd(["list2"], timeout=20)
+                self._run_cmd(["list2"], timeout=20, ld_version=ld_version)
                 return True
             except Exception:
                 return False
-        serial = self.get_serial(index)
+        serial = self.get_serial(index, ld_version=ld_version)
         try:
             listing = self._run_adb(["devices"], timeout=20)
         except Exception:
@@ -475,68 +519,72 @@ class LDPlayerService:
         return False
 
     def restart_instance(self, index: int, wait_boot: bool = True,
-                         attempts: int = 2) -> bool:
+                         attempts: int = 2, ld_version: int = 9) -> bool:
         """Recover a hung instance: force stop, relaunch, wait for boot.
 
         The ADB server is restarted too, because a frozen emulator usually
         leaves its transport in the "offline" state.
         """
         for attempt in range(1, attempts + 1):
-            self.force_stop(index)
+            self.force_stop(index, ld_version=ld_version)
             adb_service.restart_server()
             time.sleep(3)
 
             try:
-                self._run_cmd(["launch", "--index", str(index)], timeout=60)
+                self._run_cmd(["launch", "--index", str(index)], timeout=60,
+                              ld_version=ld_version)
             except Exception:
                 continue
 
             if not wait_boot:
                 return True
             try:
-                self.wait_for_boot(index)
+                self.wait_for_boot(index, ld_version=ld_version)
                 return True
             except TimeoutError:
                 log_activity("WARN",
                              f"Instance {index} did not boot (attempt {attempt}/{attempts})")
         return False
 
-    def quit_instance(self, index: int) -> bool:
-        result = self._run_cmd(["quit", "--index", str(index)])
+    def quit_instance(self, index: int, ld_version: int = 9) -> bool:
+        result = self._run_cmd(["quit", "--index", str(index)], ld_version=ld_version)
         if result.returncode != 0:
             raise RuntimeError(f"Failed to quit instance {index}: {result.stderr}")
         return True
 
-    def remove_instance(self, index: int) -> bool:
+    def remove_instance(self, index: int, ld_version: int = 9) -> bool:
         """Delete an instance.
 
         LDPlayer refuses to remove a running emulator, so it is stopped and
         waited out first; deleting a live instance would leave its vmdk behind.
         """
-        if self.is_running(index):
-            self.quit_instance(index)
-            if not self._wait_stopped(index, timeout=180):
+        if self.is_running(index, ld_version=ld_version):
+            self.quit_instance(index, ld_version=ld_version)
+            if not self._wait_stopped(index, timeout=180, ld_version=ld_version):
                 raise RuntimeError(
                     f"Instance {index} did not stop, refusing to delete it")
-        result = self._run_cmd(["remove", "--index", str(index)], timeout=900)
+        result = self._run_cmd(["remove", "--index", str(index)], timeout=900,
+                               ld_version=ld_version)
         if result.returncode != 0:
             raise RuntimeError(f"Failed to remove instance {index}: {result.stderr}")
         return True
 
-    def is_running(self, index: int) -> bool:
+    def is_running(self, index: int, ld_version: int = 9) -> bool:
         # LDPlayer prints "running" / "stop", not 1 / 0.
         try:
-            result = self._run_cmd(["isrunning", "--index", str(index)], timeout=20)
+            result = self._run_cmd(["isrunning", "--index", str(index)], timeout=20,
+                                   ld_version=ld_version)
         except Exception:
             return False
         return result.stdout.strip().lower() == "running"
 
-    def get_serial(self, index: int) -> Optional[str]:
+    def get_serial(self, index: int, ld_version: int = 9) -> Optional[str]:
         """Resolve the ADB serial for a specific LDPlayer index.
 
         LDPlayer exposes instance N on host port (5555 + 2*N), which the ADB
         server reports as "emulator-<port-1>".  Verified on LDPlayer 9.1.63:
-        index 1 -> port 5557 -> emulator-5556.
+        index 1 -> port 5557 -> emulator-5556. LDPlayer 14 uses the same
+        port scheme for its own instances.
 
         The previous implementation returned the FIRST serial listed by
         `adb devices`, so every command silently targeted the wrong instance.
@@ -544,13 +592,14 @@ class LDPlayerService:
         port = 5555 + (2 * index)
         return f"emulator-{port - 1}"
 
-    def install_app(self, index: int, apk_path: Path) -> Tuple[bool, str]:
+    def install_app(self, index: int, apk_path: Path,
+                    ld_version: int = 9) -> Tuple[bool, str]:
         """Install a single APK via ADB (verified against real install output)."""
         apk_path = Path(apk_path)
         if not apk_path.exists():
             return False, f"APK not found: {apk_path}"
 
-        serial = self.get_serial(index)
+        serial = self.get_serial(index, ld_version=ld_version)
         if not serial:
             return False, f"No ADB serial for instance {index}"
 
@@ -562,53 +611,76 @@ class LDPlayerService:
             return True, f"Installed {apk_path.name}"
         return False, f"Failed to install {apk_path.name}"
 
-    def uninstall_app(self, index: int, package_name: str) -> bool:
+    def uninstall_app(self, index: int, package_name: str,
+                      ld_version: int = 9) -> bool:
         result = self._run_cmd(
-            ["uninstallapp", "--index", str(index), "--packagename", package_name]
+            ["uninstallapp", "--index", str(index), "--packagename", package_name],
+            ld_version=ld_version
         )
         return result.returncode == 0
 
-    def is_app_installed(self, index: int, package_name: str) -> bool:
+    def is_app_installed(self, index: int, package_name: str,
+                         ld_version: int = 9) -> bool:
         result = self._run_cmd(
-            ["operateinfo", "--index", str(index), "--file", "installed_list.txt"]
+            ["operateinfo", "--index", str(index), "--file", "installed_list.txt"],
+            ld_version=ld_version
         )
         return result.returncode == 0
 
-    def launch_app(self, index: int, package_name: str) -> bool:
+    def launch_app(self, index: int, package_name: str,
+                   ld_version: int = 9) -> bool:
         result = self._run_cmd(
-            ["runapp", "--index", str(index), "--packagename", package_name]
+            ["runapp", "--index", str(index), "--packagename", package_name],
+            ld_version=ld_version
         )
         return result.returncode == 0
 
-    def get_android_version(self, index: int) -> Optional[str]:
-        result = self._run_cmd(["getprop", "--index", str(index), "--key", "ro.build.version.release"])
+    def get_android_version(self, index: int, ld_version: int = 9) -> Optional[str]:
+        result = self._run_cmd(["getprop", "--index", str(index), "--key", "ro.build.version.release"],
+                               ld_version=ld_version)
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
         return None
 
     def sync_instances_to_db(self):
-        instances = self.list_instances()
+        """Mirror every installation's instance list into the database.
+
+        Rows are keyed by (ld_version, ld_index) so LDPlayer 9 and 14 can
+        both use index numbers independently. An installation that is not
+        configured (or whose ldconsole fails right now) is skipped instead
+        of failing the whole sync.
+        """
         with Database.transaction() as conn:
-            for inst in instances:
-                detail = self.get_instance_detail(inst.index)
-                conn.execute(
-                    """
-                    INSERT INTO instances (ld_index, name, status, serial, android_version, resolution, cpu_cores, memory_mb, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(ld_index) DO UPDATE SET
-                        name=excluded.name,
-                        status=excluded.status,
-                        serial=excluded.serial,
-                        android_version=excluded.android_version,
-                        resolution=excluded.resolution,
-                        cpu_cores=excluded.cpu_cores,
-                        memory_mb=excluded.memory_mb,
-                        updated_at=CURRENT_TIMESTAMP
-                    """,
-                    (inst.index, inst.name, inst.status, self.get_serial(inst.index),
-                     detail.android_version if detail else None, detail.resolution if detail else None,
-                     detail.cpu_cores if detail else None, detail.memory_mb if detail else None),
-                )
+            for ld_version in (9, 14):
+                if ld_version == 14 and not settings.ldplayer14.is_configured():
+                    continue
+                try:
+                    instances = self.list_instances(ld_version=ld_version)
+                except Exception as e:
+                    log_activity("WARN",
+                                 f"Sync LDPlayer {ld_version} that bai: {e}")
+                    continue
+                for inst in instances:
+                    detail = self.get_instance_detail(inst.index, ld_version=ld_version)
+                    conn.execute(
+                        """
+                        INSERT INTO instances (ld_index, ld_version, name, status, serial, android_version, resolution, cpu_cores, memory_mb, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        ON CONFLICT(ld_version, ld_index) DO UPDATE SET
+                            name=excluded.name,
+                            status=excluded.status,
+                            serial=excluded.serial,
+                            android_version=excluded.android_version,
+                            resolution=excluded.resolution,
+                            cpu_cores=excluded.cpu_cores,
+                            memory_mb=excluded.memory_mb,
+                            updated_at=CURRENT_TIMESTAMP
+                        """,
+                        (inst.index, ld_version, inst.name, inst.status,
+                         self.get_serial(inst.index, ld_version=ld_version),
+                         detail.android_version if detail else None, detail.resolution if detail else None,
+                         detail.cpu_cores if detail else None, detail.memory_mb if detail else None),
+                    )
 
     def get_db_instances(self) -> List[Dict[str, Any]]:
         with Database.transaction() as conn:

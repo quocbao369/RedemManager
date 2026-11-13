@@ -29,10 +29,10 @@ class FakeLD:
         self.copy_rc = copy_rc
         self.commands = []
 
-    def list_instances(self):
+    def list_instances(self, ld_version=9):
         return [_inst(i) for i in self.indices]
 
-    def run_cmd(self, args, timeout=None):
+    def run_cmd(self, args, timeout=None, ld_version=9):
         self.commands.append(list(args))
         if args and args[0] == "copy":
             if not self.hide_new:
@@ -73,7 +73,7 @@ def test_clone_stopped_source_issues_copy(svc):
     copy = [c for c in ld.commands if c[0] == "copy"][0]
     # ldconsole only accepts --name BEFORE --from; the reverse order fails.
     assert copy == ["copy", "--name", "clone-a", "--from", "0"]
-    fin.assert_called_once_with(2, True)
+    fin.assert_called_once_with(2, True, 9)
 
 
 def test_clone_omits_name_when_not_given(svc):
@@ -96,7 +96,7 @@ def test_clone_passes_phone_mode_flag(svc):
             patch.object(svc, "_finalize_new_instance", return_value=5) as fin, \
             patch.object(svc, "_run_cmd", side_effect=ld.run_cmd):
         svc.clone_instance(0, phone_mode=False)
-    fin.assert_called_once_with(1, False)
+    fin.assert_called_once_with(1, False, 9)
 
 
 def test_clone_stopped_source_is_not_restarted(svc):
@@ -127,9 +127,9 @@ def test_clone_running_source_stops_then_restarts(svc):
             patch.object(svc, "_run_cmd", side_effect=ld.run_cmd):
         assert svc.clone_instance(0) == 77
 
-    quit_.assert_called_once_with(0)
-    waited.assert_called_once_with(0, timeout=180)
-    launch.assert_called_once_with(0, wait_for_boot=False)
+    quit_.assert_called_once_with(0, ld_version=9)
+    waited.assert_called_once_with(0, timeout=180, ld_version=9)
+    launch.assert_called_once_with(0, wait_for_boot=False, ld_version=9)
 
 
 def test_clone_restarts_source_even_when_index_unknown(svc):
@@ -145,7 +145,7 @@ def test_clone_restarts_source_even_when_index_unknown(svc):
         with pytest.raises(RuntimeError):
             svc.clone_instance(0)
 
-    launch.assert_called_once_with(0, wait_for_boot=False)
+    launch.assert_called_once_with(0, wait_for_boot=False, ld_version=9)
 
 
 def test_clone_name_argument_comes_before_from(svc):
@@ -174,7 +174,7 @@ def test_clone_uses_exit_code_as_new_index(svc):
             patch.object(svc, "_finalize_new_instance", return_value=42) as fin, \
             patch.object(svc, "_run_cmd", side_effect=ld.run_cmd):
         assert svc.clone_instance(0) == 42
-    fin.assert_called_once_with(4, True)
+    fin.assert_called_once_with(4, True, 9)
 
 
 def test_clone_rejects_negative_exit_code(svc):
@@ -196,7 +196,7 @@ def test_clone_falls_back_to_parsed_index(svc):
             patch.object(svc, "_finalize_new_instance", return_value=42) as fin, \
             patch.object(svc, "_run_cmd", side_effect=ld.run_cmd):
         assert svc.clone_instance(0) == 42
-    fin.assert_called_once_with(4, True)
+    fin.assert_called_once_with(4, True, 9)
 
 
 def test_clone_raises_when_index_undeterminable(svc):
@@ -216,3 +216,5 @@ def test_instance_create_model_carries_clone_from():
     assert app_module.InstanceCreate(name="x", phone_mode=True,
                                     clone_from=0).clone_from == 0
     assert app_module.InstanceCreate(name=None).clone_from is None
+    # New instances default to the LDPlayer 9 installation.
+    assert app_module.InstanceCreate(name=None).ld_version == 9

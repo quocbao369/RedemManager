@@ -21,6 +21,12 @@
                 <input type="text" name="adb_path" id="adb-path" placeholder="C:\ProgramFiles\LDPlayer\adb.exe">
             </div>
             <div class="form-group">
+                <label>LDPlayer 14 Directory (tuy chon)</label>
+                <input type="text" name="ldplayer14_path" id="ldplayer14-path" placeholder="C:\LDPlayer\LDPlayer14">
+                <small>De trong neu khong dung LDPlayer 14. Thu muc phai chua ldconsole.exe.
+                    Sau khi luu, tab LDPlayer cho phep tao instance tren LD14.</small>
+            </div>
+            <div class="form-group">
                 <label>Bing APK Path</label>
                 <input type="text" name="bing_apk_path" id="bing-apk-path" placeholder="D:\AccMicro\MicrosoftBing_33.5.440623004_apkcombo.com.apk">
                 <small>Thay doi co hieu luc ngay, khong can restart va duoc luu vao .env.</small>
@@ -199,5 +205,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/settings.js?v=20261109"></script>
+<script src="/static/js/settings.js?v=20261114"></script>
 {% endblock %}

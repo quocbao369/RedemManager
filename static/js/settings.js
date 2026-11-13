@@ -2,6 +2,8 @@ function loadSettings() {
     app.api('/api/settings')
         .then(config => {
             document.getElementById('ldplayer-path').value = config.ldplayer_path;
+            const ld14El = document.getElementById('ldplayer14-path');
+            if (ld14El) ld14El.value = config.ldplayer14_path || '';
             document.getElementById('adb-path').value = config.adb_path;
             document.getElementById('bing-apk-path').value = config.bing_apk_path;
             document.getElementById('oxyproxy-xapk-path').value = config.oxyproxy_xapk_path;

@@ -301,8 +301,9 @@ class OxyProxyAutomation:
 
 
 def configure_oxyproxy(index: int, name: str, host: str, port: str,
-                       username: str, password: str) -> StepResult:
-    serial = ldplayer_service.get_serial(index)
+                       username: str, password: str,
+                       ld_version: int = 9) -> StepResult:
+    serial = ldplayer_service.get_serial(index, ld_version=ld_version)
     if not adb_service.ensure_device(serial):
         return StepResult(False, f"ADB {serial} khong online")
     return OxyProxyAutomation(serial).configure(name, host, port, username, password)

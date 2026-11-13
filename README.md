@@ -1,15 +1,15 @@
 # RedemManager
 
-Standalone Python dashboard for managing LDPlayer 9 instances, ADB, app installation, proxy configuration, and automated workflows for Bing login.
+Standalone Python dashboard for managing LDPlayer 9 / 14 instances, ADB, app installation, proxy configuration, and automated workflows for Bing login.
 
 ## Features
 
-- **LDPlayer Manager**: List, create, start, stop, and remove instances; check ADB connectivity and boot status
+- **LDPlayer Manager**: List, create, start, stop, and remove instances; check ADB connectivity and boot status; supports TWO installations (LDPlayer 9 and optionally LDPlayer 14) — pick the emulator type when creating a new instance
 - **App Manager**: Verify APK/XAPK files, install Bing APK and OxyProxy XAPK, launch apps
 - **Proxy Manager**: Add HTTP/HTTPS/SOCKS5 proxies with authentication, test connectivity, configure on device
 - **Workflow Monitor**: 11-step automated workflow with real-time WebSocket updates
 - **Logs**: Filterable live logs with JSON export
-- **Settings**: Configure paths, timeouts, and server settings with validation
+- **Settings**: Configure paths, timeouts, and server settings with validation; OS file picker for DB paths with instant load (no restart)
 
 ## Workflow Steps
 
@@ -28,7 +28,7 @@ Standalone Python dashboard for managing LDPlayer 9 instances, ADB, app installa
 ## Requirements
 
 - Python 3.11+
-- LDPlayer 9 installed
+- LDPlayer 9 installed (LDPlayer 14 optional — set its folder in Settings > Paths)
 - ADB (bundled with LDPlayer)
 - Windows 10/11
 
@@ -70,6 +70,7 @@ All settings in `.env`:
 | Variable             | Description                  | Default                                                     |
 | -------------------- | ---------------------------- | ----------------------------------------------------------- |
 | `LDPLAYER_PATH`      | LDPlayer 9 install directory | `C:\ProgramFiles\LDPlayer`                                  |
+| `LDPLAYER14_PATH`    | LDPlayer 14 install directory (optional; empty = disabled) | *(empty)*                     |
 | `BING_APK_PATH`      | Path to Bing APK             | `D:\AccMicro\MicrosoftBing_33.5.440623004_apkcombo.com.apk` |
 | `OXYPROXY_XAPK_PATH` | Path to OxyProxy XAPK        | `D:\AccMicro\OxyProxy.xapk`                                 |
 | `SERVER_PORT`        | Dashboard port               | `8765`                                                      |

@@ -20,6 +20,7 @@
             <thead>
                 <tr>
                     <th>Index</th>
+                    <th>Loại</th>
                     <th>Name</th>
                     <th>Email</th>
                     <th>Status</th>
@@ -48,13 +49,23 @@
                 <input type="text" name="name" placeholder="Leave empty for auto-name">
             </div>
             <div class="form-group">
+                <label>Loại giả lập</label>
+                <select name="ld_version" id="ld-version-select">
+                    <option value="9">LDPlayer 9</option>
+                    <option value="14">LDPlayer 14</option>
+                </select>
+                <small class="form-hint">LDPlayer 14 phai duoc cau hinh tai Settings &gt; Paths
+                    (LDPlayer 14 Directory) truoc khi chon duoc.</small>
+            </div>
+            <div class="form-group">
                 <label>Copy từ instance (optional)</label>
-                <select name="clone_from" id="clone-from-select">
+                <select name="clone_from" id="clone-from-select" onchange="onCloneSourceChange()">
                     <option value="">-- Tạo mới trống (không có app) --</option>
                 </select>
                 <small class="form-hint">Copy se giu nguyen device ID (Android ID, IMEI, MAC) cua may nguon,
                     khien Microsoft bao loi <b>check thiet bi 24h</b>. Chi dung
-                    khi can instance giong het y chang.</small>
+                    khi can instance giong het y chang. Chon nguon copy tu LDPlayer nao
+                    se dat loai gia lap theo LDPlayer do.</small>
             </div>
             <div class="form-group">
                 <label class="checkbox-label">
@@ -102,5 +113,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/instances.js?v=20261106"></script>
+<script src="/static/js/instances.js?v=20261114"></script>
 {% endblock %}

@@ -35,13 +35,14 @@ function renderInstances() {
 
     const list = getFilteredInstances();
     if (!list.length) {
-        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted)">No instances found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--text-muted)">No instances found</td></tr>';
         return;
     }
 
     tbody.innerHTML = list.map(inst => `
         <tr>
             <td>${inst.index}</td>
+            <td><span class="badge badge-${(inst.ld_version || 9) === 14 ? 'warning' : 'secondary'}">LD${inst.ld_version || 9}</span></td>
             <td>${escapeHtml(inst.name)}</td>
             <td>${inst.email
                 ? `<code title="${escapeHtml(inst.email)}">${escapeHtml(inst.email)}</code>`
@@ -99,22 +100,70 @@ function confirmRemoveInstance(dbId) {
 function showCreateInstanceModal() {
     const form = document.getElementById('create-instance-form');
     if (form) form.reset();
+    // form.reset() clears values but never re-enables a locked select.
+    const typeSelect = document.getElementById('ld-version-select');
+    if (typeSelect) typeSelect.disabled = false;
+    populateRuntimes();
     populateCloneSources();
     app.showModal('create-instance-modal');
 }
 
+// Fill the "Loai gia lap" dropdown with the LDPlayer installations that can
+// actually be driven (ldconsole.exe exists). LDPlayer 14 stays selectable
+// but disabled with a hint until its folder is configured in Settings.
+async function populateRuntimes() {
+    const select = document.getElementById('ld-version-select');
+    if (!select) return;
+    try {
+        const { versions } = await app.api('/api/ldplayer/runtimes');
+        const byVersion = {};
+        (versions || []).forEach(v => { byVersion[v.version] = v; });
+        Array.from(select.options).forEach(opt => {
+            const info = byVersion[Number(opt.value)];
+            if (info) {
+                opt.disabled = !info.available;
+                if (!info.available) opt.textContent = `${info.name} (chua cau hinh trong Settings)`;
+                else opt.textContent = info.name;
+            }
+        });
+        // Do not leave the selection on a disabled option.
+        if (select.selectedOptions[0] && select.selectedOptions[0].disabled) {
+            const firstEnabled = Array.from(select.options).find(o => !o.disabled);
+            if (firstEnabled) select.value = firstEnabled.value;
+        }
+    } catch (err) {
+        console.warn('khong tai duoc danh sach runtimes', err);
+    }
+}
+
+// Picking a clone source decides the installation: the copy always lives on
+// the same LDPlayer as its source, so the type select follows and locks.
+function onCloneSourceChange() {
+    const select = document.getElementById('clone-from-select');
+    const typeSelect = document.getElementById('ld-version-select');
+    if (!select || !typeSelect) return;
+    if (select.value) {
+        typeSelect.value = select.value.split(':')[0];
+        typeSelect.disabled = true;
+    } else {
+        typeSelect.disabled = false;
+    }
+}
+
 // Fill the "copy from" dropdown with the instances LDPlayer currently has.
+// The option value carries the installation too ("14:5") because the same
+// index can exist in both LDPlayer 9 and 14.
 async function populateCloneSources() {
     const select = document.getElementById('clone-from-select');
     if (!select) return;
     try {
-        const { items } = await app.api('/api/instances');
+        const items = await app.api('/api/instances');
         select.innerHTML = '<option value="">-- Tao moi (khong copy) --</option>';
         (items || []).forEach((inst) => {
             const opt = document.createElement('option');
-            opt.value = inst.index;
+            opt.value = `${inst.ld_version || 9}:${inst.index}`;
             const running = String(inst.status).toLowerCase() === 'running';
-            opt.textContent = `LDPlayer-${inst.index} - ${inst.name}`
+            opt.textContent = `LD${inst.ld_version || 9}-${inst.index} - ${inst.name}`
                 + (running ? ' (dang chay)' : '');
             select.appendChild(opt);
         });
@@ -149,18 +198,27 @@ function initInstancesPage() {
             const formData = new FormData(form);
             const name = formData.get('name') || null;
             const phoneMode = formData.get('phone_mode') === 'on';
-            const rawClone = formData.get('clone_from');
-            const cloneFrom = rawClone && rawClone !== '' ? Number(rawClone) : null;
+            // "14:5" = clone index 5 from LDPlayer 14; plain "5" (legacy) = LD9.
+            const rawClone = formData.get('clone_from') || '';
+            let cloneFrom = null;
+            let ldVersion = Number(formData.get('ld_version')) || 9;
+            if (rawClone && rawClone.includes(':')) {
+                const parts = rawClone.split(':');
+                ldVersion = Number(parts[0]) || ldVersion;
+                cloneFrom = Number(parts[1]);
+            } else if (rawClone) {
+                cloneFrom = Number(rawClone);
+            }
 
             try {
                 const result = await app.api('/api/instances', {
                     method: 'POST',
-                    body: JSON.stringify({ name, phone_mode: phoneMode, clone_from: cloneFrom }),
+                    body: JSON.stringify({ name, phone_mode: phoneMode, clone_from: cloneFrom, ld_version: ldVersion }),
                 });
                 app.showToast(
                     cloneFrom === null
-                        ? `Instance created with index ${result.index}`
-                        : `Copied from LDPlayer-${cloneFrom} -> index ${result.index}`,
+                        ? `Instance created on LD${result.ld_version || ldVersion} with index ${result.index}`
+                        : `Copied from LD${ldVersion}-${cloneFrom} -> index ${result.index}`,
                     'success');
                 hideCreateInstanceModal();
                 loadInstances();

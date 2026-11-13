@@ -147,9 +147,10 @@ class InstallerService:
 
         return self.install_xapk(serial, self.oxyproxy_xapk)
 
-    def is_installed_to_index(self, index: int, package_name: str) -> bool:
+    def is_installed_to_index(self, index: int, package_name: str,
+                              ld_version: int = 9) -> bool:
         """Check whether a package is already present in an instance."""
-        serial = ldplayer_service.get_serial(index)
+        serial = ldplayer_service.get_serial(index, ld_version=ld_version)
         if not adb_service.ensure_device(serial, timeout=30):
             return False
         try:
@@ -161,11 +162,13 @@ class InstallerService:
         out = result.stdout or ""
         return any(line.strip() == f"package:{package_name}" for line in out.splitlines())
 
-    def install_apk_to_index(self, index: int, apk_path: Path) -> Tuple[bool, str]:
+    def install_apk_to_index(self, index: int, apk_path: Path,
+                             ld_version: int = 9) -> Tuple[bool, str]:
         """Install an APK into an LDPlayer instance via ldconsole (no ADB required)."""
-        return ldplayer_service.install_app(index, apk_path)
+        return ldplayer_service.install_app(index, apk_path, ld_version=ld_version)
 
-    def install_xapk_to_index(self, index: int, xapk_path: Path) -> Tuple[bool, str]:
+    def install_xapk_to_index(self, index: int, xapk_path: Path,
+                              ld_version: int = 9) -> Tuple[bool, str]:
         tmpdir = self._extract_xapk(xapk_path)
         try:
             manifest_path = tmpdir / "manifest.json"
@@ -190,7 +193,7 @@ class InstallerService:
             base_apk = next((a for a in apks if a.name not in split_names), None) or apks[0]
             ordered = [base_apk] + [a for a in apks if a != base_apk]
 
-            serial = ldplayer_service.get_serial(index)
+            serial = ldplayer_service.get_serial(index, ld_version=ld_version)
             if not adb_service.ensure_device(serial):
                 return False, f"ADB device {serial} is not online"
 
@@ -202,15 +205,15 @@ class InstallerService:
         finally:
             self._cleanup_extract(tmpdir)
 
-    def install_bing_to_index(self, index: int) -> Tuple[bool, str]:
+    def install_bing_to_index(self, index: int, ld_version: int = 9) -> Tuple[bool, str]:
         if not self.bing_apk.exists():
             return False, f"Bing APK not found: {self.bing_apk}"
-        return ldplayer_service.install_app(index, self.bing_apk)
+        return ldplayer_service.install_app(index, self.bing_apk, ld_version=ld_version)
 
-    def install_oxyproxy_to_index(self, index: int) -> Tuple[bool, str]:
+    def install_oxyproxy_to_index(self, index: int, ld_version: int = 9) -> Tuple[bool, str]:
         if not self.oxyproxy_xapk.exists():
             return False, f"OxyProxy XAPK not found: {self.oxyproxy_xapk}"
-        return self.install_xapk_to_index(index, self.oxyproxy_xapk)
+        return self.install_xapk_to_index(index, self.oxyproxy_xapk, ld_version=ld_version)
 
     def verify_installation(self, serial: str, package_name: str) -> Dict:
         installed = adb_service.is_package_installed(serial, package_name)

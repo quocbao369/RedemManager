@@ -72,7 +72,8 @@ class Database:
             cursor.executescript("""
                 CREATE TABLE IF NOT EXISTS instances (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    ld_index INTEGER UNIQUE NOT NULL,
+                    ld_index INTEGER NOT NULL,
+                    ld_version INTEGER NOT NULL DEFAULT 9,
                     name TEXT NOT NULL,
                     status TEXT DEFAULT 'stopped',
                     serial TEXT,
@@ -81,7 +82,8 @@ class Database:
                     memory_mb INTEGER,
                     resolution TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(ld_version, ld_index)
                 );
 
                 CREATE TABLE IF NOT EXISTS proxy_profiles (
@@ -172,8 +174,67 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_account_mapping_instance ON account_mapping(instance_id);
             """)
 
+            cls._migrate_instances_schema(conn)
+
             conn.commit()
             cls._initialized = True
+
+    @classmethod
+    def _migrate_instances_schema(cls, conn: sqlite3.Connection) -> None:
+        """Rebuild `instances` when it still uses the pre-LD14 schema.
+
+        Old databases keyed an instance by ld_index alone. With a second
+        LDPlayer installation (version 14) the same index can exist in both
+        installs, so the key becomes (ld_version, ld_index). SQLite cannot
+        drop a UNIQUE constraint, hence the table rebuild.
+
+        Child tables (workflows / activity_logs / account_mapping) hold
+        FOREIGN KEY ... ON DELETE SET NULL references to instances(id); the
+        rebuild runs with foreign_keys OFF so dropping the parent table does
+        not null out every mapping row in the process.
+        """
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(instances)").fetchall()}
+        if "ld_version" in columns:
+            return
+
+        rows = conn.execute(
+            "SELECT id, ld_index, name, status, serial, android_version, "
+            "cpu_cores, memory_mb, resolution, created_at, updated_at FROM instances"
+        ).fetchall()
+
+        conn.execute("PRAGMA foreign_keys = OFF")
+        try:
+            conn.execute("BEGIN")
+            conn.execute("DROP TABLE instances")
+            conn.execute("""
+                CREATE TABLE instances (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ld_index INTEGER NOT NULL,
+                    ld_version INTEGER NOT NULL DEFAULT 9,
+                    name TEXT NOT NULL,
+                    status TEXT DEFAULT 'stopped',
+                    serial TEXT,
+                    android_version TEXT,
+                    cpu_cores INTEGER,
+                    memory_mb INTEGER,
+                    resolution TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(ld_version, ld_index)
+                )
+            """)
+            conn.executemany(
+                "INSERT INTO instances (id, ld_index, ld_version, name, status, serial, "
+                "android_version, cpu_cores, memory_mb, resolution, created_at, updated_at) "
+                "VALUES (?, ?, 9, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [tuple(r) for r in rows],
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.execute("PRAGMA foreign_keys = ON")
 
     @classmethod
     def close_all(cls):
