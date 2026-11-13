@@ -87,6 +87,10 @@ echo.
 echo Press Ctrl+C to stop the server.
 echo.
 
+REM Auto-open the dashboard once the server answers /api/health
+REM (poll up to 30s; a hidden PowerShell helper does the waiting).
+start "" /min powershell -NoProfile -WindowStyle Hidden -Command "$u='http://127.0.0.1:8765/api/health'; for($i=0;$i -lt 30;$i++){ try{ $r=Invoke-WebRequest $u -UseBasicParsing -TimeoutSec 2; if($r.StatusCode -eq 200){ break } }catch{}; Start-Sleep 1 }; Start-Process 'http://127.0.0.1:8765'"
+
 "%PYTHON_EXE%" -c "import uvicorn; from app import app; uvicorn.run(app, host='127.0.0.1', port=8765, log_level='info')"
 
 echo.
