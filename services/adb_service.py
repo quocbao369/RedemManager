@@ -106,16 +106,23 @@ class ADBService:
         while time.time() < deadline:
             if _online():
                 return True
-            host, _, port = serial.partition(":")
-            port = port or "5555"
-            try:
-                self._run(["disconnect", serial], timeout=20)
-            except Exception:
-                pass
-            try:
-                self._run(["connect", f"{host}:{port}"], timeout=20)
-            except Exception:
-                pass
+            # Serial "emulator-5560" means the console sits on port 5560 and
+            # the ADB transport on 127.0.0.1:5561 (port = serial + 1). Serials
+            # that already carry "host:port" are used as they are.
+            if ":" in serial:
+                target = serial
+            else:
+                tail = serial.rsplit("-", 1)[-1]
+                target = f"127.0.0.1:{int(tail) + 1}" if tail.isdigit() else None
+            if target:
+                try:
+                    self._run(["disconnect", target], timeout=20)
+                except Exception:
+                    pass
+                try:
+                    self._run(["connect", target], timeout=20)
+                except Exception:
+                    pass
             time.sleep(4)
 
             # Halfway through, recycle the ADB server: an offline transport
@@ -214,8 +221,44 @@ class ADBService:
         result = self._run(["-s", serial, "shell", "pm", "list", "packages", package_name])
         return package_name in result.stdout
 
+    def resolve_launcher_activity(self, serial: str,
+                                  package_name: str) -> Optional[str]:
+        """Return "<package>/<activity>" for the app's LAUNCHER entry, or None.
+
+        Needs `cmd` (Android 7+), which every current LDPlayer image ships.
+        """
+        result = self._run([
+            "-s", serial, "shell", "cmd", "package", "resolve-activity",
+            "--brief", "-c", "android.intent.category.LAUNCHER", package_name,
+        ])
+        for line in (result.stdout or "").splitlines():
+            line = line.strip()
+            if line.startswith(package_name + "/"):
+                return line
+        return None
+
     def launch_package(self, serial: str, package_name: str) -> bool:
-        result = self._run(["-s", serial, "shell", "monkey", "-p", package_name, "-c", "android.intent.category.LAUNCHER", "1"])
+        """Bring an app to the foreground.
+
+        LDPlayer 14's Android image has no /system/bin/monkey (the shell
+        answers "monkey: inaccessible or not found"), so an app "opened"
+        through monkey silently stays closed. Start the resolved launcher
+        activity explicitly instead; monkey remains the fallback for images
+        where resolve-activity is unavailable.
+
+        `am start` exits 0 even when it fails ("Error type 3 ... does not
+        exist"), so the output is checked as well.
+        """
+        activity = self.resolve_launcher_activity(serial, package_name)
+        if activity:
+            result = self._run(["-s", serial, "shell", "am", "start", "-n", activity])
+            out = ((result.stdout or "") + (result.stderr or "")).lower()
+            if result.returncode == 0 and "error" not in out:
+                return True
+        result = self._run([
+            "-s", serial, "shell", "monkey", "-p", package_name,
+            "-c", "android.intent.category.LAUNCHER", "1",
+        ])
         return result.returncode == 0
 
     def kill_package(self, serial: str, package_name: str) -> bool:
@@ -234,6 +277,29 @@ class ADBService:
 
     def shell(self, serial: str, command: str) -> subprocess.CompletedProcess:
         return self._run(["-s", serial, "shell"] + command.split())
+
+    def getprop(self, serial: str, prop: str) -> str:
+        """Return a system property value, or "" when it cannot be read."""
+        result = self.shell(serial, f"getprop {prop}")
+        if result.returncode != 0:
+            return ""
+        return (result.stdout or "").strip()
+
+    def get_setting(self, serial: str, namespace: str, key: str) -> str:
+        """Read a settings key; the unset marker "null" is mapped to ""."""
+        result = self.shell(serial, f"settings get {namespace} {key}")
+        if result.returncode != 0:
+            return ""
+        value = (result.stdout or "").strip()
+        return "" if value == "null" else value
+
+    def get_state(self, serial: str) -> str:
+        """Return the adb state of a serial ("device", "offline", ...) or ""."""
+        try:
+            result = self._run(["-s", serial, "get-state"], timeout=15)
+        except Exception:
+            return ""
+        return (result.stdout or "").strip() if result.returncode == 0 else ""
 
     def push(self, serial: str, local_path: Path, remote_path: str) -> bool:
         result = self._run(["-s", serial, "push", str(local_path), remote_path])

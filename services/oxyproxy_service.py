@@ -144,7 +144,9 @@ class OxyProxyAutomation:
     def launch(self) -> None:
         self._shell("am", "force-stop", PACKAGE)
         time.sleep(2)
-        self._shell("monkey", "-p", PACKAGE, "-c", "android.intent.category.LAUNCHER", "1")
+        # Same reason as bing_login_service.launch: monkey does not exist on
+        # LD14's image, so start the launcher activity through adb_service.
+        adb_service.launch_package(self.serial, PACKAGE)
         # Wait until the list screen has rendered (Compose needs a moment).
         self.wait_for(
             lambda x: (self._on_form(x)

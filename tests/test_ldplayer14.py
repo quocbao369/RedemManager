@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 from fastapi.testclient import TestClient
 
-from config import settings
+from config import LDPlayer14Config, settings
 from database import Database
 from services.ldplayer_service import LDPlayerService, InstanceInfo
 
@@ -29,15 +29,37 @@ def client():
     return TestClient(app_module.app)
 
 
+@pytest.fixture
+def unconfigured_ld14():
+    """Force the LD14 runtime into its 'not configured' state.
+
+    A developer .env may legitimately contain LDPLAYER14_PATH; these tests
+    must not depend on the machine's configuration.
+    """
+    old = (settings.ldplayer14.ldplayer_path, settings.ldplayer14.ldconsole_path,
+           settings.ldplayer14.adb_path)
+    settings.ldplayer14.ldplayer_path = None
+    settings.ldplayer14.ldconsole_path = None
+    settings.ldplayer14.adb_path = None
+    try:
+        yield
+    finally:
+        (settings.ldplayer14.ldplayer_path,
+         settings.ldplayer14.ldconsole_path,
+         settings.ldplayer14.adb_path) = old
+
+
 def _ok(stdout="", stderr="", returncode=0):
     return type("R", (), {"stdout": stdout, "stderr": stderr,
                           "returncode": returncode})()
 
 
 # ------------------------------------------------------------------ config
-def test_ld14_config_unset_by_default():
-    cfg = settings.ldplayer14
-    # The test environment never configures LDPLAYER14_PATH.
+def test_ld14_config_unset_by_default(monkeypatch):
+    # With no LDPLAYER14_PATH in the environment a fresh config stays unset,
+    # regardless of what the developer's .env contains.
+    monkeypatch.delenv("LDPLAYER14_PATH", raising=False)
+    cfg = LDPlayer14Config()
     assert cfg.ldconsole_path is None
     assert cfg.is_configured() is False
 
@@ -166,7 +188,7 @@ class RecordingConsole:
         return _ok()
 
 
-def test_console_path_raises_when_ld14_not_configured():
+def test_console_path_raises_when_ld14_not_configured(unconfigured_ld14):
     svc = LDPlayerService()
     with pytest.raises(RuntimeError, match="LDPlayer 14"):
         svc._console_path(14)
@@ -223,16 +245,16 @@ def test_sync_stores_both_installations(tmp_path):
 
 
 # --------------------------------------------------------------------- api
-def test_runtimes_endpoint_lists_both_versions(client):
+def test_runtimes_endpoint_lists_both_versions(client, unconfigured_ld14):
     r = client.get("/api/ldplayer/runtimes")
     assert r.status_code == 200
     versions = {v["version"] for v in r.json()["versions"]}
     assert versions == {9, 14}
     ld14 = [v for v in r.json()["versions"] if v["version"] == 14][0]
-    assert ld14["available"] is False  # never configured in the test env
+    assert ld14["available"] is False  # forced unconfigured by the fixture
 
 
-def test_create_instance_rejects_unconfigured_ld14(client):
+def test_create_instance_rejects_unconfigured_ld14(client, unconfigured_ld14):
     r = client.post("/api/instances", json={"name": "x", "ld_version": 14})
     assert r.status_code == 400
     assert "LDPlayer 14" in r.json()["detail"]

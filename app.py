@@ -964,11 +964,12 @@ async def api_update_settings(update: SettingsUpdate):
     # Must go through apply_settings_update(): the config object is built at
     # import time, so writing only to os.environ never changed what the app
     # (or the Settings form) actually reads.
-    apply_settings_update(values)
+    warn_list = apply_settings_update(values)
     changes = {k: v for k, v in values.items() if v is not None}
 
     errors = validate_paths()
-    return {"success": len(errors) == 0, "changes": changes, "errors": errors}
+    return {"success": len(errors) == 0, "changes": changes, "errors": errors,
+            "warnings": warn_list}
 
 
 class SettingsLoadRequest(BaseModel):

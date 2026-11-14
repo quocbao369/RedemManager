@@ -134,7 +134,10 @@ class BingLoginAutomation:
     def launch(self) -> None:
         self._shell("am", "force-stop", PACKAGE)
         time.sleep(2)
-        self._shell("monkey", "-p", PACKAGE, "-c", "android.intent.category.LAUNCHER", "1")
+        # LD14's image ships without /system/bin/monkey, so the old monkey
+        # call silently did nothing there; adb_service starts the resolved
+        # launcher activity and only falls back to monkey.
+        adb_service.launch_package(self.serial, PACKAGE)
 
     def dismiss_onboarding(self) -> None:
         """Tap "Không phải bây giờ" when the Copilot intro shows up."""

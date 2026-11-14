@@ -138,25 +138,43 @@ def _write_env(updates: dict) -> None:
     ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def apply_settings_update(values: dict) -> None:
+def apply_settings_update(values: dict) -> list:
     """Apply saved values to the running config and to .env.
 
     `settings` is built once at import time, so only writing to os.environ
     left every later read pointing at the old value: the Settings form
     reported "saved" and then reloaded the previous path. This mutates the
     same object the rest of the app already imported.
+
+    Returns human-readable warnings for saved values that were skipped.
     """
     env_updates: dict = {}
+    warnings: list = []
 
     if values.get("ldplayer_path"):
         folder = Path(values["ldplayer_path"])
-        settings.ldplayer.ldplayer_path = folder
-        settings.ldplayer.ldconsole_path = folder / "ldconsole.exe"
-        env_updates["LDPLAYER_PATH"] = str(folder)
-        # ADB normally lives next to ldconsole, unless it is set explicitly.
-        if not values.get("adb_path"):
-            settings.ldplayer.adb_path = folder / "adb.exe"
-            env_updates["ADB_PATH"] = str(settings.ldplayer.adb_path)
+        # Guard: the LDPlayer 14 folder belongs in its own field. Saving it as
+        # the main path reroutes every LDPlayer 9 machine to an installation
+        # that owns none of those instance indexes, so most launches then find
+        # no emulator at all and apps never open.
+        ld14_same = False
+        try:
+            ld14_same = (settings.ldplayer14.is_configured()
+                         and folder.resolve() == Path(settings.ldplayer14.ldplayer_path).resolve())
+        except Exception:
+            ld14_same = False
+        if ld14_same:
+            warnings.append(
+                "Bo qua 'LDPlayer Directory' vi no trung voi thu muc LDPlayer 14. "
+                "LD9 giu o 'LDPlayer Directory'; LD14 chi dung o 'LDPlayer 14 Directory'.")
+        else:
+            settings.ldplayer.ldplayer_path = folder
+            settings.ldplayer.ldconsole_path = folder / "ldconsole.exe"
+            env_updates["LDPLAYER_PATH"] = str(folder)
+            # ADB normally lives next to ldconsole, unless it is set explicitly.
+            if not values.get("adb_path"):
+                settings.ldplayer.adb_path = folder / "adb.exe"
+                env_updates["ADB_PATH"] = str(settings.ldplayer.adb_path)
 
     if values.get("adb_path"):
         settings.ldplayer.adb_path = Path(values["adb_path"])
@@ -238,6 +256,7 @@ def apply_settings_update(values: dict) -> None:
         os.environ[key] = value
     if env_updates:
         _write_env(env_updates)
+    return warnings
 
 
 def validate_paths() -> list[str]:

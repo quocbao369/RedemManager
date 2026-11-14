@@ -38,6 +38,7 @@ function saveSettings(data) {
         body: JSON.stringify(data),
     })
     .then(result => {
+        (result.warnings || []).forEach(w => app.showToast(w, 'warning', 12000));
         if (result.success) {
             app.showToast('Settings saved', 'success');
             loadSettings();

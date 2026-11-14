@@ -319,27 +319,84 @@ class LDPlayerService:
                                 ld_version: int = 9) -> bool:
         """Switch the Android system locale of a running instance to vi-VN.
 
-        LDPlayer only stores its own UI language (leidians.config); the guest
-        locale lives in the system properties, so it has to be pushed over
-        ADB. Changing it needs a framework restart to take effect.
+        The bundled images disagree on where the locale lives:
+          * Android 9 (LDPlayer 9) boots the framework from the persist.sys.*
+            properties and its adb shell is root, so setprop + stop/start
+            applies the language without a reboot.
+          * Android 14 (LDPlayer 14) ignores those properties once running
+            and reads the system_locales setting instead; its shell is NOT
+            root ("stop" -> Must be root), so the value is written into the
+            settings provider and the guest is rebooted over adb.
+        Both mechanisms are written so either image picks the language up.
         """
         serial = self.get_serial(index, ld_version=ld_version)
         if not serial or not adb_service.ensure_device(serial, timeout=60):
             return False
 
-        for prop, value in (("persist.sys.locale", "vi-VN"),
-                            ("persist.sys.language", "vi"),
-                            ("persist.sys.country", "VN")):
-            adb_service.shell(serial, "setprop %s %s" % (prop, value))
-
-        if not restart_framework:
+        # Already Vietnamese? The setting is what Android 7+ honours.
+        if "vi" in adb_service.get_setting(serial, "system", "system_locales").lower():
             return True
 
-        adb_service.shell(serial, "stop")
-        time.sleep(5)
-        adb_service.shell(serial, "start")
-        # The framework restarts; wait for Android to accept ADB again.
-        return adb_service.ensure_device(serial, timeout=180)
+        # Pre-Android-13 images boot from persist.sys.* only: the property
+        # already being right means the language is in effect (LDPlayer 9).
+        if adb_service.getprop(serial, "persist.sys.locale") == "vi-VN" \
+                and self._android_sdk(serial) < 33:
+            return True
+
+        ok = True
+        for command in ("settings put system system_locales vi-VN",
+                        "setprop persist.sys.locale vi-VN",
+                        "setprop persist.sys.language vi",
+                        "setprop persist.sys.country VN"):
+            result = adb_service.shell(serial, command)
+            out = (result.stdout or "") + (result.stderr or "")
+            if result.returncode != 0 or "Error" in out or "Exception" in out:
+                ok = False
+
+        if not restart_framework:
+            return ok
+
+        # A framework restart is needed for the locale to take effect: root
+        # shells (LDPlayer 9) can stop/start it, anything else is rebooted.
+        whoami = adb_service.shell(serial, "id -u")
+        if whoami.returncode == 0 and (whoami.stdout or "").strip() == "0":
+            adb_service.shell(serial, "stop")
+            time.sleep(5)
+            adb_service.shell(serial, "start")
+            return ok and adb_service.ensure_device(serial, timeout=180)
+        try:
+            adb_service.shell(serial, "reboot")
+        except Exception:
+            pass  # the transport drops as the guest reboots - expected
+        return ok and self._wait_boot_completed(
+            serial, timeout=settings.ldplayer.boot_timeout)
+
+    def _android_sdk(self, serial: str) -> int:
+        try:
+            return int(adb_service.getprop(serial, "ro.build.version.sdk") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _wait_boot_completed(self, serial: str, timeout: int = 300) -> bool:
+        """Poll ADB until a rebooting guest reports sys.boot_completed=1.
+
+        Unlike wait_for_boot() this never launches or restarts the instance
+        (a rebooting one is already running) and has no restart-on-timeout
+        fallback, so it is safe to call right after `adb reboot`.
+        """
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                if adb_service.get_state(serial) == "device":
+                    boot = adb_service.shell(serial, "getprop sys.boot_completed")
+                    if boot.returncode == 0 and (boot.stdout or "").strip() == "1":
+                        return True
+                else:
+                    adb_service.ensure_device(serial, timeout=10)
+            except Exception:
+                pass
+            time.sleep(5)
+        return False
 
     def configure_phone_mode(self, index: int, ld_version: int = 9) -> bool:
         # Compact portrait phone: 480x854 @ 240dpi, 2 CPU, 2048 MB
