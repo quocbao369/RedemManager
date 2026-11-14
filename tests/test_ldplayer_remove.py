@@ -35,8 +35,8 @@ def test_remove_running_instance_stops_it_first(svc):
             patch.object(svc, "_run_cmd", return_value=_ok()) as run:
         assert svc.remove_instance(2) is True
 
-    quit_.assert_called_once_with(2)
-    waited.assert_called_once_with(2, timeout=180)
+    quit_.assert_called_once_with(2, ld_version=9)
+    waited.assert_called_once_with(2, timeout=180, ld_version=9)
     assert run.call_args[0][0] == ["remove", "--index", "2"]
 
 

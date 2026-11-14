@@ -108,8 +108,35 @@
         </section>
     </div>
 </div>
+<div class="modal" id="assign-instance-modal">
+    <div class="modal-content">
+        <header class="modal-header">
+            <h3>Assign Instance</h3>
+            <button class="modal-close" onclick="hideAssignModal()">&times;</button>
+        </header>
+        <div class="form-group">
+            <label>Account</label>
+            <code id="assign-email-label"></code>
+        </div>
+        <div class="form-group">
+            <label>Chọn LDPlayer (loại giả lập)</label>
+            <select id="assign-ld-version">
+                <option value="9">LDPlayer 9</option>
+                <option value="14">LDPlayer 14</option>
+            </select>
+            <small class="form-hint">Se tao mot may emu moi trong ban LDPlayer duoc chon.
+                May moi co san ID rieng (Android ID / IMEI / MAC) de tranh loi
+                <b>check thiet bi 24h</b>. LDPlayer 14 phai duoc cau hinh tai
+                Settings &gt; Paths truoc.</small>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="hideAssignModal()">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="confirmAssignInstance()">Tạo &amp; Gán</button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/dashboard.js?v=20261106"></script>
+<script src="/static/js/dashboard.js?v=20261114"></script>
 {% endblock %}

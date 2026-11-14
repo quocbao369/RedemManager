@@ -414,8 +414,9 @@ class BingLoginAutomation:
         return self.submit_password(email)
 
 
-def bing_login(index: int, email: str, password: str) -> StepResult:
-    serial = ldplayer_service.get_serial(index)
+def bing_login(index: int, email: str, password: str,
+               ld_version: int = 9) -> StepResult:
+    serial = ldplayer_service.get_serial(index, ld_version=ld_version)
     if not adb_service.ensure_device(serial):
         return StepResult(False, f"ADB {serial} khong online")
     return BingLoginAutomation(serial).login(email, password)

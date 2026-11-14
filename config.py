@@ -29,6 +29,40 @@ class LDPlayerConfig:
 
 
 @dataclass
+class LDPlayer14Config:
+    """Optional second LDPlayer installation (LDPlayer 14).
+
+    Each install owns its own ldconsole.exe and its own set of instances
+    with 0-based indices, so instance index 3 can exist in BOTH installs.
+    The dashboard defaults to version 9; version 14 is only drivable once
+    its install folder is configured (Settings > Paths, or LDPLAYER14_PATH).
+    """
+    ldplayer_path: Optional[Path] = None
+    ldconsole_path: Optional[Path] = None
+    adb_path: Optional[Path] = None
+
+    def __post_init__(self):
+        # Environment fallback so the folder can also be set without the UI.
+        env = (os.getenv("LDPLAYER14_PATH") or "").strip()
+        if env and self.ldplayer_path is None:
+            self.ldplayer_path = Path(env)
+        if self.ldplayer_path is not None:
+            self.ldplayer_path = Path(self.ldplayer_path)
+            if self.ldconsole_path is None:
+                self.ldconsole_path = self.ldplayer_path / "ldconsole.exe"
+            if self.adb_path is None:
+                self.adb_path = self.ldplayer_path / "adb.exe"
+        if self.ldconsole_path is not None:
+            self.ldconsole_path = Path(self.ldconsole_path)
+        if self.adb_path is not None:
+            self.adb_path = Path(self.adb_path)
+
+    def is_configured(self) -> bool:
+        """True only when ldconsole.exe actually exists on disk."""
+        return bool(self.ldconsole_path and self.ldconsole_path.exists())
+
+
+@dataclass
 class AppConfig:
     bing_apk_path: Path = field(default_factory=lambda: Path(os.getenv("BING_APK_PATH", r"D:\AccMicro\MicrosoftBing_33.5.440623004_apkcombo.com.apk")))
     oxyproxy_xapk_path: Path = field(default_factory=lambda: Path(os.getenv("OXYPROXY_XAPK_PATH", r"D:\AccMicro\OxyProxy.xapk")))
@@ -74,6 +108,7 @@ class RewardsConfig:
 @dataclass
 class Settings:
     ldplayer: LDPlayerConfig = field(default_factory=LDPlayerConfig)
+    ldplayer14: LDPlayer14Config = field(default_factory=LDPlayer14Config)
     apps: AppConfig = field(default_factory=AppConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
@@ -126,6 +161,22 @@ def apply_settings_update(values: dict) -> None:
     if values.get("adb_path"):
         settings.ldplayer.adb_path = Path(values["adb_path"])
         env_updates["ADB_PATH"] = str(settings.ldplayer.adb_path)
+
+    # LDPlayer 14 (optional): a filled folder enables it, an empty field
+    # disables it again. The key being absent (None) leaves things untouched.
+    if "ldplayer14_path" in values and values.get("ldplayer14_path") is not None:
+        raw = str(values["ldplayer14_path"]).strip()
+        if raw:
+            folder = Path(raw)
+            settings.ldplayer14.ldplayer_path = folder
+            settings.ldplayer14.ldconsole_path = folder / "ldconsole.exe"
+            settings.ldplayer14.adb_path = folder / "adb.exe"
+            env_updates["LDPLAYER14_PATH"] = str(folder)
+        else:
+            settings.ldplayer14.ldplayer_path = None
+            settings.ldplayer14.ldconsole_path = None
+            settings.ldplayer14.adb_path = None
+            env_updates["LDPLAYER14_PATH"] = ""
 
     if values.get("bing_apk_path"):
         settings.apps.bing_apk_path = Path(values["bing_apk_path"])
@@ -195,6 +246,10 @@ def validate_paths() -> list[str]:
         errors.append(f"ldconsole not found: {settings.ldplayer.ldconsole_path}")
     if not settings.ldplayer.adb_path.exists():
         errors.append(f"adb not found: {settings.ldplayer.adb_path}")
+    # LDPlayer 14 is validated only when a folder was configured: an unset
+    # install is a valid state ("khong dung LD14"), a wrong folder is not.
+    if settings.ldplayer14.ldconsole_path and not settings.ldplayer14.ldconsole_path.exists():
+        errors.append(f"LDPlayer 14 ldconsole not found: {settings.ldplayer14.ldconsole_path}")
     if not settings.apps.bing_apk_path.exists():
         errors.append(f"Bing APK not found: {settings.apps.bing_apk_path}")
     if not settings.apps.oxyproxy_xapk_path.exists():

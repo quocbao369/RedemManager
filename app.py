@@ -126,6 +126,7 @@ def render_template(template_name: str, context: dict):
 
 class SettingsUpdate(BaseModel):
     ldplayer_path: Optional[str] = None
+    ldplayer14_path: Optional[str] = None
     adb_path: Optional[str] = None
     bing_apk_path: Optional[str] = None
     oxyproxy_xapk_path: Optional[str] = None
@@ -190,7 +191,14 @@ async def health():
 @app.get("/api/instances")
 async def api_instances():
     instances = ldplayer_service.list_instances()
-    db_instances = {i["ld_index"]: i for i in ldplayer_service.get_db_instances()}
+    # The optional LDPlayer 14 installation is merged in; its instances use
+    # their own 0-based indices, so rows are keyed by (ld_version, ld_index).
+    if settings.ldplayer14.is_configured():
+        instances = instances + ldplayer_service.list_instances(ld_version=14)
+    db_instances = {
+        (i.get("ld_version") or 9, i["ld_index"]): i
+        for i in ldplayer_service.get_db_instances()
+    }
     # Instance names are shortened (the "@domain" part is cut), so the mapped
     # account email is shipped too - the search box and the table need it.
     emails = {}
@@ -201,10 +209,11 @@ async def api_instances():
             emails[row["instance_id"]] = row["account_email"]
     result = []
     for inst in instances:
-        db = db_instances.get(inst.index, {})
+        db = db_instances.get((inst.ld_version, inst.index), {})
         result.append({
             "id": db.get("id"),
             "index": inst.index,
+            "ld_version": inst.ld_version,
             "name": inst.name,
             "email": emails.get(db.get("id")),
             "status": inst.status,
@@ -230,8 +239,22 @@ class InstanceCreate(BaseModel):
     name: Optional[str] = None
     phone_mode: bool = True
     # When set the new instance is cloned from this LDPlayer index instead of
-    # being created empty (LDPlayer "copy --from").
+    # being created empty (LDPlayer "copy --from"). The source lives in the
+    # same installation as the new instance.
     clone_from: Optional[int] = None
+    # Which LDPlayer installation owns the new instance (9 default, 14 opt-in).
+    ld_version: int = 9
+
+
+def _validate_ld_version(ld_version: int) -> int:
+    """Only drivable installations may be targeted."""
+    if ld_version not in (9, 14):
+        raise HTTPException(400, f"Loai gia lap khong ho tro: {ld_version} (chi 9 hoac 14)")
+    if ld_version == 14 and not settings.ldplayer14.is_configured():
+        raise HTTPException(400,
+                            "LDPlayer 14 chua duoc cau hinh - dat thu muc cai dat "
+                            "trong Settings > Paths (LDPlayer 14 Directory)")
+    return ld_version
 
 
 @app.post("/api/instances")
@@ -239,6 +262,7 @@ async def api_create_instance(payload: InstanceCreate):
     # The UI posts JSON; this used to be declared with Form(), which silently
     # dropped every field (the name never reached LDPlayer).
     name, phone_mode = payload.name, payload.phone_mode
+    ld_version = _validate_ld_version(payload.ld_version)
     try:
         # Cloning copies the whole disk image and takes minutes. Running it
         # inline would block the event loop and freeze the whole dashboard,
@@ -246,12 +270,14 @@ async def api_create_instance(payload: InstanceCreate):
         if payload.clone_from is not None:
             index = await run_in_threadpool(
                 ldplayer_service.clone_instance, payload.clone_from, name,
-                phone_mode)
+                phone_mode, ld_version)
         else:
             index = await run_in_threadpool(
-                ldplayer_service.create_instance, name, phone_mode)
+                ldplayer_service.create_instance, name, phone_mode, ld_version)
         ldplayer_service.sync_instances_to_db()
-        return {"success": True, "index": index}
+        return {"success": True, "index": index, "ld_version": ld_version}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -259,18 +285,42 @@ async def api_create_instance(payload: InstanceCreate):
 @app.post("/api/instances/{db_id}/rename")
 async def api_rename_instance(db_id: int, name: str = Form(...)):
     try:
-        ld_index = ldplayer_service.get_ld_index(db_id)
-        if ld_index is None:
+        identity = ldplayer_service.get_instance_identity(db_id)
+        if identity is None:
             raise HTTPException(404, "Instance not found")
-        ldplayer_service.rename_instance(ld_index, name)
+        ld_index, ld_version = identity
+        ldplayer_service.rename_instance(ld_index, name, ld_version=ld_version)
         ldplayer_service.sync_instances_to_db()
         return {"success": True}
     except Exception as e:
         raise HTTPException(500, str(e))
 
 
+@app.get("/api/ldplayer/runtimes")
+async def api_ldplayer_runtimes():
+    """Which LDPlayer installations exist and are drivable.
+
+    The Create Instance dialog uses this to offer only usable versions.
+    """
+    return {"versions": [
+        {
+            "version": 9,
+            "name": "LDPlayer 9",
+            "path": str(settings.ldplayer.ldplayer_path),
+            "available": settings.ldplayer.ldconsole_path.exists(),
+        },
+        {
+            "version": 14,
+            "name": "LDPlayer 14",
+            "path": str(settings.ldplayer14.ldplayer_path or ""),
+            "available": settings.ldplayer14.is_configured(),
+        },
+    ]}
+
+
 def _setup_oxyproxy_for_account(db_id: int, ld_index: int, email: Optional[str],
-                               say=lambda m, l="info": None) -> str:
+                                say=lambda m, l="info": None,
+                                ld_version: int = 9) -> str:
     """Make sure OxyProxy has a connected "DF" entry for this account.
 
     V6: rotate the global proxy once, then (re)connect the existing DF entry.
@@ -312,13 +362,15 @@ def _setup_oxyproxy_for_account(db_id: int, ld_index: int, email: Optional[str],
         ld_index, "DF",
         str(proxy["host"]), str(proxy["port"]),
         str(proxy.get("username") or ""), str(proxy.get("password") or ""),
+        ld_version=ld_version,
     )
     msg = f"OxyProxy: {result.message}"
     say(msg, "success" if result.success else "error")
     return msg
 
 
-def _ensure_apps(ld_index: int, db_id: int, say=lambda m, l="info": None) -> Tuple[bool, bool]:
+def _ensure_apps(ld_index: int, db_id: int, say=lambda m, l="info": None,
+                 ld_version: int = 9) -> Tuple[bool, bool]:
     """Install the required apps only when they are missing.
 
     Instances are created fresh rather than cloned, so each one starts empty
@@ -329,21 +381,21 @@ def _ensure_apps(ld_index: int, db_id: int, say=lambda m, l="info": None) -> Tup
     bing_pkg = settings.apps.bing_package_name
     oxy_pkg = "io.oxylabs.proxymanager"
 
-    bing_ok = installer_service.is_installed_to_index(ld_index, bing_pkg)
+    bing_ok = installer_service.is_installed_to_index(ld_index, bing_pkg, ld_version=ld_version)
     if bing_ok:
         say("Bing da duoc cai dat")
     else:
         say("Dang cai dat Bing...")
-        result = installer_service.install_bing_to_index(ld_index)
+        result = installer_service.install_bing_to_index(ld_index, ld_version=ld_version)
         bing_ok = bool(result[0])
         say(f"Bing: {result[1]}", "success" if bing_ok else "error")
 
-    oxy_ok = installer_service.is_installed_to_index(ld_index, oxy_pkg)
+    oxy_ok = installer_service.is_installed_to_index(ld_index, oxy_pkg, ld_version=ld_version)
     if oxy_ok:
         say("OxyProxy da duoc cai dat")
     else:
         say("Dang cai dat OxyProxy...")
-        result = installer_service.install_oxyproxy_to_index(ld_index)
+        result = installer_service.install_oxyproxy_to_index(ld_index, ld_version=ld_version)
         oxy_ok = bool(result[0])
         say(f"OxyProxy: {result[1]}", "success" if oxy_ok else "error")
 
@@ -351,7 +403,8 @@ def _ensure_apps(ld_index: int, db_id: int, say=lambda m, l="info": None) -> Tup
 
 
 def _bing_login_for_account(db_id: int, ld_index: int, email: Optional[str],
-                            say=lambda m, l="info": None) -> str:
+                            say=lambda m, l="info": None,
+                            ld_version: int = 9) -> str:
     """Sign the Bing app in with the account's Microsoft credentials."""
     accounts = rewards_service.get_accounts()
     account = rewards_service.find_account(email)
@@ -359,7 +412,8 @@ def _bing_login_for_account(db_id: int, ld_index: int, email: Optional[str],
         return "Bing login: skipped (khong co mat khau)"
 
     say("Dang dang nhap Bing...")
-    result = bing_login_service.bing_login(ld_index, email, account.password)
+    result = bing_login_service.bing_login(ld_index, email, account.password,
+                                           ld_version=ld_version)
     msg = f"Bing login: {result.message}"
     say(msg, "success" if result.success else "error")
     return msg
@@ -367,7 +421,8 @@ def _bing_login_for_account(db_id: int, ld_index: int, email: Optional[str],
 
 def _launch_and_install(db_id: int, ld_index: int, install_apps: bool,
                         account_email: Optional[str] = None,
-                        sign_in_bing: bool = False) -> None:
+                        sign_in_bing: bool = False,
+                        ld_version: int = 9) -> None:
     """Background worker.
 
     Order: boot -> set Vietnamese locale -> install the apps if missing ->
@@ -382,13 +437,14 @@ def _launch_and_install(db_id: int, ld_index: int, install_apps: bool,
     ok = True
     try:
         say("Dang khoi dong LDPlayer...")
-        ldplayer_service.launch_instance(ld_index, wait_for_boot=True)
+        ldplayer_service.launch_instance(ld_index, wait_for_boot=True,
+                                         ld_version=ld_version)
         ldplayer_service.sync_instances_to_db()
         say("LDPlayer da len")
 
         # Vietnamese guest locale; done right after boot while ADB is fresh.
         try:
-            if ldplayer_service.set_vietnamese_language(ld_index):
+            if ldplayer_service.set_vietnamese_language(ld_index, ld_version=ld_version):
                 say("Da chuyen ngon ngu he thong sang tieng Viet")
         except Exception as e:
             say(f"Khong chuyen duoc ngon ngu: {e}", "warn")
@@ -396,14 +452,16 @@ def _launch_and_install(db_id: int, ld_index: int, install_apps: bool,
         if not install_apps:
             return
 
-        bing_ok, oxy_ok = _ensure_apps(ld_index, db_id, say)
+        bing_ok, oxy_ok = _ensure_apps(ld_index, db_id, say, ld_version=ld_version)
 
         # The proxy entry is only meaningful once OxyProxy is actually there.
         if oxy_ok:
-            _setup_oxyproxy_for_account(db_id, ld_index, account_email, say)
+            _setup_oxyproxy_for_account(db_id, ld_index, account_email, say,
+                                        ld_version=ld_version)
 
         if sign_in_bing and account_email and bing_ok:
-            _bing_login_for_account(db_id, ld_index, account_email, say)
+            _bing_login_for_account(db_id, ld_index, account_email, say,
+                                    ld_version=ld_version)
     except Exception as e:
         ok = False
         say(f"Launch/install failed: {e}", "error")
@@ -423,28 +481,33 @@ async def api_instance_progress(db_id: int, since: float = 0.0):
 
 @app.get("/api/instances/{db_id}/health")
 async def api_instance_health(db_id: int):
-    ld_index = ldplayer_service.get_ld_index(db_id)
-    if ld_index is None:
+    identity = ldplayer_service.get_instance_identity(db_id)
+    if identity is None:
         raise HTTPException(404, "Instance not found")
-    serial = ldplayer_service.get_serial(ld_index)
+    ld_index, ld_version = identity
+    serial = ldplayer_service.get_serial(ld_index, ld_version=ld_version)
     return {
         "instance_id": db_id,
         "ld_index": ld_index,
+        "ld_version": ld_version,
         "serial": serial,
-        "responsive": ldplayer_service.is_responsive(ld_index),
-        "pids": ldplayer_service.get_pids(ld_index),
+        "responsive": ldplayer_service.is_responsive(ld_index, ld_version=ld_version),
+        "pids": ldplayer_service.get_pids(ld_index, ld_version=ld_version),
         "adb_online": adb_service.ensure_device(serial, timeout=10),
     }
 
 
 @app.post("/api/instances/{db_id}/restart")
-async def api_restart_instance(db_id: int, wait_boot: bool = True):
-    ld_index = ldplayer_service.get_ld_index(db_id)
-    if ld_index is None:
+async def api_restart_instance(db_id: int, wait_boot: bool = True,
+                               background_tasks: BackgroundTasks = None):
+    identity = ldplayer_service.get_instance_identity(db_id)
+    if identity is None:
         raise HTTPException(404, "Instance not found")
+    ld_index, ld_version = identity
 
     def _work():
-        ok = ldplayer_service.restart_instance(ld_index, wait_boot=wait_boot)
+        ok = ldplayer_service.restart_instance(ld_index, wait_boot=wait_boot,
+                                               ld_version=ld_version)
         ldplayer_service.sync_instances_to_db()
         log_activity("INFO" if ok else "ERROR",
                      f"Restart instance {ld_index}: {'OK' if ok else 'FAILED'}",
@@ -475,13 +538,15 @@ async def api_collect_redeem(email: str, save: bool = True):
     instance_id = rewards_service.get_mapping(email)
     if not instance_id:
         raise HTTPException(400, "Account chua gan instance")
-    ld_index = ldplayer_service.get_ld_index(instance_id)
-    if ld_index is None:
+    identity = ldplayer_service.get_instance_identity(instance_id)
+    if identity is None:
         raise HTTPException(400, "Khong tim thay instance")
-    if not ldplayer_service.is_running(ld_index):
+    ld_index, ld_version = identity
+    if not ldplayer_service.is_running(ld_index, ld_version=ld_version):
         raise HTTPException(400, "Instance dang tat, hay mo instance truoc")
 
-    result = bing_redeem_service.collect_redeem_info(ld_index, expected_email=email)
+    result = bing_redeem_service.collect_redeem_info(ld_index, expected_email=email,
+                                                     ld_version=ld_version)
     if not result.success:
         raise HTTPException(400, result.message)
 
@@ -546,32 +611,34 @@ async def api_launch_instance(db_id: int, install_apps: bool = True,
                               account_email: Optional[str] = None,
                               sign_in_bing: bool = False,
                               background_tasks: BackgroundTasks = None):
-    ld_index = ldplayer_service.get_ld_index(db_id)
-    if ld_index is None:
+    identity = ldplayer_service.get_instance_identity(db_id)
+    if identity is None:
         raise HTTPException(404, "Instance not found")
+    ld_index, ld_version = identity
 
     # Booting + installing can take minutes; keep it off the event loop so the
     # rest of the dashboard stays responsive.
     job_progress.start_job(db_id)
     background_tasks.add_task(_launch_and_install, db_id, ld_index, install_apps,
-                              account_email, sign_in_bing)
+                              account_email, sign_in_bing, ld_version)
     return {"success": True, "status": "launching", "instance_id": db_id}
 
 
 @app.post("/api/instances/{db_id}/quit")
 async def api_quit_instance(db_id: int):
     try:
-        ld_index = ldplayer_service.get_ld_index(db_id)
-        if ld_index is None:
+        identity = ldplayer_service.get_instance_identity(db_id)
+        if identity is None:
             raise HTTPException(404, "Instance not found")
-        success = ldplayer_service.quit_instance(ld_index)
+        ld_index, ld_version = identity
+        success = ldplayer_service.quit_instance(ld_index, ld_version=ld_version)
         ldplayer_service.sync_instances_to_db()
         return {"success": success}
     except Exception as e:
         raise HTTPException(500, str(e))
 
 
-def _remove_worker(db_id: int, ld_index: int) -> None:
+def _remove_worker(db_id: int, ld_index: int, ld_version: int = 9) -> None:
     """Delete an instance off the request path.
 
     `ldconsole remove` wipes the whole disk image and can run for minutes;
@@ -583,13 +650,13 @@ def _remove_worker(db_id: int, ld_index: int) -> None:
                      msg, instance_id=db_id)
 
     try:
-        if ldplayer_service.is_running(ld_index):
+        if ldplayer_service.is_running(ld_index, ld_version=ld_version):
             say("Dang tat LDPlayer truoc khi xoa...")
-            ldplayer_service.quit_instance(ld_index)
+            ldplayer_service.quit_instance(ld_index, ld_version=ld_version)
             say("Dang cho may tat han...")
-            ldplayer_service._wait_stopped(ld_index, timeout=180)
+            ldplayer_service._wait_stopped(ld_index, timeout=180, ld_version=ld_version)
         say("Dang xoa LDPlayer, co the lai vai phut...")
-        ldplayer_service.remove_instance(ld_index)
+        ldplayer_service.remove_instance(ld_index, ld_version=ld_version)
         say("Da xoa LDPlayer", "success")
     except Exception as e:
         say(f"Xoa LDPlayer that bai: {e}", "error")
@@ -602,22 +669,24 @@ def _remove_worker(db_id: int, ld_index: int) -> None:
 
 @app.post("/api/instances/{db_id}/remove")
 async def api_remove_instance(db_id: int, background_tasks: BackgroundTasks = None):
-    ld_index = ldplayer_service.get_ld_index(db_id)
-    if ld_index is None:
+    identity = ldplayer_service.get_instance_identity(db_id)
+    if identity is None:
         raise HTTPException(404, "Instance not found")
+    ld_index, ld_version = identity
 
     job_progress.start_job(db_id)
-    background_tasks.add_task(_remove_worker, db_id, ld_index)
+    background_tasks.add_task(_remove_worker, db_id, ld_index, ld_version)
     return {"success": True, "status": "removing", "instance_id": db_id}
 
 
 @app.get("/api/instances/{db_id}/serial")
 async def api_instance_serial(db_id: int):
     try:
-        ld_index = ldplayer_service.get_ld_index(db_id)
-        if ld_index is None:
+        identity = ldplayer_service.get_instance_identity(db_id)
+        if identity is None:
             raise HTTPException(404, "Instance not found")
-        serial = ldplayer_service.get_serial(ld_index)
+        ld_index, ld_version = identity
+        serial = ldplayer_service.get_serial(ld_index, ld_version=ld_version)
         return {"serial": serial}
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -676,28 +745,32 @@ async def api_apps_status():
 
 @app.post("/api/apps/install/bing")
 async def api_install_bing(instance_id: int = Form(...)):
-    ld_index = ldplayer_service.get_ld_index(instance_id)
-    if ld_index is None:
+    identity = ldplayer_service.get_instance_identity(instance_id)
+    if identity is None:
         raise HTTPException(404, "Instance not found")
-    success, msg = installer_service.install_bing_to_index(ld_index)
+    ld_index, ld_version = identity
+    success, msg = installer_service.install_bing_to_index(ld_index, ld_version=ld_version)
     return {"success": success, "message": msg}
 
 
 @app.post("/api/apps/install/oxyproxy")
 async def api_install_oxyproxy(instance_id: int = Form(...)):
-    ld_index = ldplayer_service.get_ld_index(instance_id)
-    if ld_index is None:
+    identity = ldplayer_service.get_instance_identity(instance_id)
+    if identity is None:
         raise HTTPException(404, "Instance not found")
-    success, msg = installer_service.install_oxyproxy_to_index(ld_index)
+    ld_index, ld_version = identity
+    success, msg = installer_service.install_oxyproxy_to_index(ld_index, ld_version=ld_version)
     return {"success": success, "message": msg}
 
 
 @app.post("/api/apps/launch/bing")
 async def api_launch_bing(instance_id: int = Form(...)):
-    ld_index = ldplayer_service.get_ld_index(instance_id)
-    if ld_index is None:
+    identity = ldplayer_service.get_instance_identity(instance_id)
+    if identity is None:
         raise HTTPException(404, "Instance not found")
-    ok = ldplayer_service.launch_app(ld_index, settings.apps.bing_package_name)
+    ld_index, ld_version = identity
+    ok = ldplayer_service.launch_app(ld_index, settings.apps.bing_package_name,
+                                     ld_version=ld_version)
     return {"success": ok, "message": "Bing launched" if ok else "Failed to launch Bing"}
 
 
@@ -818,6 +891,7 @@ async def api_logs(workflow_id: Optional[int] = None, instance_id: Optional[int]
 async def api_get_settings():
     return {
         "ldplayer_path": str(settings.ldplayer.ldplayer_path),
+        "ldplayer14_path": str(settings.ldplayer14.ldplayer_path) if settings.ldplayer14.ldplayer_path else "",
         "adb_path": str(settings.ldplayer.adb_path),
         "bing_apk_path": str(settings.apps.bing_apk_path),
         "oxyproxy_xapk_path": str(settings.apps.oxyproxy_xapk_path),
@@ -870,6 +944,7 @@ async def api_rotate_proxy():
 async def api_update_settings(update: SettingsUpdate):
     values = {
         "ldplayer_path": update.ldplayer_path,
+        "ldplayer14_path": update.ldplayer14_path,
         "adb_path": update.adb_path,
         "bing_apk_path": update.bing_apk_path,
         "oxyproxy_xapk_path": update.oxyproxy_xapk_path,

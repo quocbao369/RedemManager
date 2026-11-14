@@ -24,7 +24,7 @@ def test_remove_endpoint_returns_immediately(client):
     request hung with it, and the X button looked frozen.
     """
     started = time.time()
-    with patch("app.ldplayer_service.get_ld_index", return_value=5), \
+    with patch("app.ldplayer_service.get_instance_identity", return_value=(5, 9)), \
             patch("app.ldplayer_service.is_running", return_value=False), \
             patch("app.ldplayer_service._wait_stopped", return_value=True), \
             patch("app.ldplayer_service.sync_instances_to_db"), \
@@ -46,7 +46,7 @@ def test_remove_endpoint_returns_immediately(client):
 
 
 def test_remove_endpoint_still_reports_unknown_instance(client):
-    with patch("app.ldplayer_service.get_ld_index", return_value=None):
+    with patch("app.ldplayer_service.get_instance_identity", return_value=None):
         assert client.post("/api/instances/999/remove").status_code == 404
 
 

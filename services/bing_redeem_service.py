@@ -563,8 +563,9 @@ class BingRedeemAutomation:
         return webview_cdp.voucher_url(self.serial) or ""
 
 
-def collect_redeem_info(index: int, expected_email: str = "") -> StepResult:
-    serial = ldplayer_service.get_serial(index)
+def collect_redeem_info(index: int, expected_email: str = "",
+                        ld_version: int = 9) -> StepResult:
+    serial = ldplayer_service.get_serial(index, ld_version=ld_version)
     if not adb_service.ensure_device(serial, timeout=45):
         return StepResult(False, f"ADB {serial} khong online")
 
